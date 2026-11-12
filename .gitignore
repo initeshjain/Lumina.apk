@@ -3,3 +3,6 @@
 local.properties
 /tools/
 *.kotlin*
+.idea/
+*.jks
+*.keystore
