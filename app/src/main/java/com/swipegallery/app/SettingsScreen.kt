@@ -73,7 +73,7 @@ internal fun SettingsPage(
     val context = LocalContext.current
     val colors = LocalAppColors.current
     @Suppress("DEPRECATION")
-    val appVersion = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0" }
+    val appVersion = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "2.0.0" }
     var showThemeDialog by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(colors.canvas)) {

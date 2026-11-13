@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -85,7 +86,14 @@ internal fun SelectionTopBar(count: Int, allSelected: Boolean, onClose: () -> Un
 
 /** Replaces the bottom navigation while items are selected. */
 @Composable
-internal fun SelectionActionBar(enabled: Boolean, canMove: Boolean, onShare: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
+internal fun SelectionActionBar(
+    enabled: Boolean,
+    canMove: Boolean,
+    onShare: () -> Unit,
+    onMove: () -> Unit,
+    onHide: (() -> Unit)? = null,
+    onDelete: () -> Unit
+) {
     val colors = LocalAppColors.current
     Row(
         Modifier
@@ -97,6 +105,7 @@ internal fun SelectionActionBar(enabled: Boolean, canMove: Boolean, onShare: () 
     ) {
         SelectionAction(Icons.Rounded.Share, "Share", colors.ink, enabled, onShare)
         if (canMove) SelectionAction(Icons.AutoMirrored.Rounded.DriveFileMove, "Move", colors.ink, enabled, onMove)
+        if (onHide != null) SelectionAction(Icons.Rounded.Lock, "Hide", colors.ink, enabled, onHide)
         SelectionAction(Icons.Rounded.DeleteOutline, "Delete", colors.red, enabled, onDelete)
     }
 }

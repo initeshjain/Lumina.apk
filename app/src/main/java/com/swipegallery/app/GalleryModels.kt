@@ -2,6 +2,10 @@ package com.swipegallery.app
 
 import android.net.Uri
 import java.text.DecimalFormat
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlin.math.log10
 import kotlin.math.pow
 
@@ -18,7 +22,7 @@ data class Photo(
     val sizeBytes: Long = 0,
 )
 
-enum class Page { Photos, Albums, Swipe }
+enum class Page { Photos, Albums, CleanUp, More }
 
 enum class MediaFilter(val label: String) { All("All"), Photos("Photos"), Videos("Videos"), Favorites("Favorites") }
 
@@ -73,3 +77,42 @@ internal fun formatFileSize(bytes: Long): String {
     val value = bytes / 1024.0.pow(digitGroups.toDouble())
     return "${DecimalFormat("#,##0.#").format(value)} ${units[digitGroups]}"
 }
+
+enum class FolderViewMode {
+    Grouped, // Shows subfolders (Months in Year, Dates in Month)
+    All      // Shows all images in this folder in a flat grid
+}
+
+enum class AlbumTab(val label: String) {
+    Device("Device Albums"),
+    Years("Year Folders")
+}
+
+data class TimeFolder(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val coverPhoto: Photo?,
+    val items: List<Photo>,
+    val year: Int? = null,
+    val month: Int? = null,
+    val day: Int? = null
+)
+
+internal val Photo.calendar: Calendar
+    get() = Calendar.getInstance().apply { timeInMillis = date * 1000L }
+
+internal val Photo.year: Int
+    get() = calendar.get(Calendar.YEAR)
+
+internal val Photo.month: Int
+    get() = calendar.get(Calendar.MONTH) + 1
+
+internal val Photo.day: Int
+    get() = calendar.get(Calendar.DAY_OF_MONTH)
+
+internal val Photo.monthName: String
+    get() = SimpleDateFormat("MMMM", Locale.getDefault()).format(Date(date * 1000L))
+
+internal val Photo.dayLabel: String
+    get() = SimpleDateFormat("d MMMM", Locale.getDefault()).format(Date(date * 1000L))

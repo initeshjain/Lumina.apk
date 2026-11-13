@@ -1,7 +1,20 @@
 package com.swipegallery.app
 
 import android.app.Activity
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BrokenImage
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -9,14 +22,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -143,6 +163,39 @@ fun GalleryTheme(
     }
 }
 
+/**
+ * Shimmer skeleton loading effect for media placeholders while images or thumbnails decode.
+ */
+@Composable
+internal fun Modifier.shimmerLoading(): Modifier {
+    val colors = LocalAppColors.current
+    val transition = rememberInfiniteTransition(label = "shimmer_transition")
+    val translateAnim by transition.animateFloat(
+        initialValue = -350f,
+        targetValue = 950f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1150, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer_anim"
+    )
+
+    val baseColor = colors.chipBackground
+    val highlightColor = if (colors.isDark) Color(0xFF32363F) else Color(0xFFFFFFFF)
+
+    val brush = Brush.linearGradient(
+        colors = listOf(
+            baseColor,
+            highlightColor.copy(alpha = if (colors.isDark) 0.55f else 0.75f),
+            baseColor
+        ),
+        start = Offset(translateAnim, translateAnim),
+        end = Offset(translateAnim + 260f, translateAnim + 260f)
+    )
+
+    return this.background(brush)
+}
+
 @Composable
 internal fun GalleryImage(
     model: Any,
@@ -151,16 +204,59 @@ internal fun GalleryImage(
     scale: ContentScale = ContentScale.Crop
 ) {
     val context = LocalContext.current
+    val colors = LocalAppColors.current
+    var isLoading by remember(model) { mutableStateOf(true) }
+    var isError by remember(model) { mutableStateOf(false) }
+
     val request = remember(model) {
         ImageRequest.Builder(context)
             .data(model)
-            .crossfade(180)
+            .crossfade(200)
             .build()
     }
-    AsyncImage(
-        model = request,
-        contentDescription = description,
-        modifier = modifier,
-        contentScale = scale
-    )
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (isLoading) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .shimmerLoading()
+            )
+        }
+
+        AsyncImage(
+            model = request,
+            contentDescription = description,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = scale,
+            onLoading = {
+                isLoading = true
+                isError = false
+            },
+            onSuccess = {
+                isLoading = false
+                isError = false
+            },
+            onError = {
+                isLoading = false
+                isError = true
+            }
+        )
+
+        if (isError && !isLoading) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.chipBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.BrokenImage,
+                    contentDescription = null,
+                    tint = colors.muted.copy(alpha = 0.45f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
 }

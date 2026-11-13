@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Version-v2.0.0-blue.svg?logo=android" alt="Version v2.0.0" />
   <img src="https://img.shields.io/badge/Kotlin-2.0.0-blue.svg?logo=kotlin" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack%20Compose-2024.12.01-green.svg?logo=android" alt="Jetpack Compose" />
   <img src="https://img.shields.io/badge/Material%203-Expressive-purple.svg" alt="Material 3" />
@@ -25,14 +26,21 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
   - [1. Pictures — Smart Timeline & Instant Search](#1-pictures--smart-timeline--instant-search)
-  - [2. Albums & Collections](#2-albums--collections)
-  - [3. Swipe Tidy — Interactive Deck Sorting](#3-swipe-tidy--interactive-deck-sorting)
-  - [4. Media Viewer & Gesture Controls](#4-media-viewer--gesture-controls)
-  - [5. Advanced Video Player](#5-advanced-video-player)
-  - [6. EXIF Details & Metadata Privacy Stripper](#6-exif-details--metadata-privacy-stripper)
-  - [7. Clean Up Assistant — Duplicate & Redundancy Scanner](#7-clean-up-assistant--duplicate--redundancy-scanner)
-  - [8. Trash Bin & Single-Prompt Deletion](#8-trash-bin--single-prompt-deletion)
-  - [9. Themes & Modern Aesthetics](#9-themes--modern-aesthetics)
+  - [2. Hierarchical Time & Folder Explorer](#2-hierarchical-time--folder-explorer)
+  - [3. Smooth Pinch-to-Zoom Grid with Live Physics](#3-smooth-pinch-to-zoom-grid-with-live-physics)
+  - [4. Modern Comfy Fast-Scroll Scrollbar with Haptics](#4-modern-comfy-fast-scroll-scrollbar-with-haptics)
+  - [5. Skeleton Shimmer Loading](#5-skeleton-shimmer-loading)
+  - [6. Continuous Drag-to-Select Gestures](#6-continuous-drag-to-select-gestures)
+  - [7. Albums & Collections](#7-albums--collections)
+  - [8. Clean Up Hub — Hybrid ML Burst & Duplicate Engine](#8-clean-up-hub--hybrid-ml-burst--duplicate-engine)
+  - [9. Swipe Tidy — Interactive Deck Sorting](#9-swipe-tidy--interactive-deck-sorting)
+  - [10. Media Viewer & Gesture Controls](#10-media-viewer--gesture-controls)
+  - [11. Advanced Video Player](#11-advanced-video-player)
+  - [12. EXIF Details, GPS Maps Intent & Metadata Privacy Stripper](#12-exif-details-gps-maps-intent--metadata-privacy-stripper)
+  - [13. Hidden Vault — 100% Offline PIN-Protected Storage](#13-hidden-vault--100-offline-pin-protected-storage)
+  - [14. Unified "More" Hub & Inline Settings](#14-unified-more-hub--inline-settings)
+  - [15. Trash Bin & Smart 4-Second Instant Undo Navigation](#15-trash-bin--smart-4-second-instant-undo-navigation)
+  - [16. Themes & Modern Aesthetics](#16-themes--modern-aesthetics)
 - [Privacy & Security Commitment](#privacy--security-commitment)
 - [Architecture & Tech Stack](#architecture--tech-stack)
 - [Building & Installation](#building--installation)
@@ -71,22 +79,84 @@ The primary **Pictures** tab organizes your visual life with smart contextual ti
 - **Live Search**: Tap the search icon to instantly filter pictures and videos by file name in real time without lag.
 - **Multi-criteria Sorting**: Sort by *Date*, *Name*, or *File Size* in both *Ascending* and *Descending* order.
 
-### 2. Albums & Collections
+### 2. Hierarchical Time & Folder Explorer
 
+Navigate your entire visual memory hierarchically through dedicated time folders:
+- **Year Folders**: Visual root view displaying folder cards for every year with cover thumbnails and photo counts.
+- **Top Dual Options inside Folders**:
+  - `All in [Year]`: Displays all photos and videos of that year in a fluid, pinchable grid.
+  - `Group`: Organizes the year into interactive **Month Folders** (January, February, March...).
+- **Month Deep Dive**:
+  - `All in [Month]`: View every image of that month in a single flat grid.
+  - `Group`: Breaks down the month into **Date Folders** for each day.
+- **Date Folders**: Jump into any single day to see photos taken on that exact date.
+- **Deep System Back Navigation**: Integrated with Android's predictive `BackHandler` and in-app breadcrumbs to step back through `Date` $\rightarrow$ `Month` $\rightarrow$ `Year` $\rightarrow$ `Root`.
+
+### 3. Smooth Pinch-to-Zoom Grid with Live Physics
+
+Fluidly scale thumbnail density using two-finger pinch gestures across the primary **Pictures** timeline, album views, and all time folder views:
+- **Continuous Visual Scaling**: Live `graphicsLayer` scale tracking expands or contracts the grid smoothly under your fingers during gestures.
+- **Dynamic Centroid Pivot**: Anchors the focal point (`TransformOrigin`) at the exact center between your two fingers.
+- **Spring Return Physics**: Integrated spring dynamics (`Spring.DampingRatioLowBouncy`) snap the grid smoothly into the target column count upon release.
+- **1 to 5 Columns**: Choose between immersive single-column full-width feeds up to 5-column ultra-dense overviews for rapid skimming.
+- **Zero Scroll Conflict**: Single-finger vertical gestures remain 100% native and unconsumed, guaranteeing silky 120Hz scrolling.
+- **Floating Density Feedback**: Animated pill badge confirms column count on each pinch gesture and persists preferences in SharedPreferences.
+
+### 4. Modern Comfy Fast-Scroll Scrollbar with Haptics
+
+Effortlessly scrub through large collections in seconds:
+- **Comfy 42dp Touch Lane**: Effortless thumb grabbing on the right edge of the screen without pixel hunting.
+- **Haptic Feedback**: Subtle vibration tick when grabbing the scrollbar thumb for tactile feedback.
+- **Dynamic Auto-Fade**: Smoothly fades in during active scrolling or dragging, and automatically fades out after 1.4 seconds of inactivity.
+- **Interactive Thumb Bar**: Expands in width and glows with Lumina's emerald accent color when touched or dragged.
+- **Floating Date Preview Bubble**: Real-time elevated pill bubble tracks alongside your thumb, showing the formatted month and year (e.g. `Nov 2024`) with strict single-line text formatting to prevent awkward wrapping.
+
+### 5. Skeleton Shimmer Loading
+
+- **Silky Shimmer Placeholders**: Animated linear gradient skeleton loading placeholders appear while media decodes and loads from disk.
+- **Zero Layout Shifts**: Preserves exact thumbnail aspect ratios without jarring layout reflows.
+- **Crossfade Transitions**: 200ms alpha crossfade once media finishes decoding, with broken-image fallback indicators if a file is damaged.
+
+### 6. Continuous Drag-to-Select Gestures
+
+- **Continuous Range Selection**: Long-press any photo to enter selection mode, then smoothly drag across rows and columns to select or deselect large ranges of photos without repeated tapping.
+- **Floating Contextual Action Bar**: Elevates when items are selected with instant batch actions:
+  - *Favorite / Unfavorite*
+  - *Share* via system share sheet
+  - *Move to Album*
+  - *Hide in Vault* (PIN-protected)
+  - *Delete* (batch trash via Scoped Storage)
+
+### 7. Albums & Collections
+
+- **Dual-Tab Switcher**: Seamlessly toggle between `Device Albums` and `Year Folders`.
 - **Automatic Folder Discovery**: Automatically indexes albums directly from device storage (e.g., Camera, Screenshots, WhatsApp, Downloads, Instagram).
 - **Dedicated Favorites Album**: One-click access to all starred media across all folders.
-- **Per-Album Deep-Dives**: Tap any album card to open an isolated grid filtered exclusively to that album.
+- **Per-Album Deep-Dives**: Tap any album card to open an isolated grid filtered exclusively to that album with full pinch-to-zoom and fast-scroll support.
 
-### 3. Swipe Tidy — Interactive Deck Sorting
+### 8. Clean Up Hub — Hybrid ML Burst & Duplicate Engine
 
-Tidying up thousands of photos is tedious. Lumina turns decluttering into an enjoyable card-stack interaction:
+Tidying up cluttered galleries shouldn't be guesswork. Lumina includes an on-device, 100% offline 3-stage Hybrid ML engine to identify burst sequences and redundant duplicates:
+
+1. **Step 1: EXIF Timestamp Windowing**: Clusters photos taken in rapid succession within a $\le 3$-second window.
+2. **Step 2: 64-bit Gradient Difference Hashing (`dHash`)**: Generates an 8-byte visual hash comparing adjacent pixel luminance gradients to confirm visual similarity independent of lighting.
+3. **Step 3: 2D Discrete Laplacian Edge Variance**: Applies a 2D discrete Laplacian filter $\begin{bmatrix} 0 & -1 & 0 \\ -1 & 4 & -1 \\ 0 & -1 & 0 \end{bmatrix}$ over downsampled $128 \times 128$ bitmaps ($\approx 3\text{ ms}$ processing time, zero UI frame drops) to measure optical focus and edge sharpness.
+
+- **`⭐ Best Shot` Auto-Crowning**: The sharpest photo in each burst sequence is crowned with a gold badge.
+- **Sharpness Score Badges**: Inferior/shaky shots receive relative blurriness indicators (e.g., `Blurry (42%)`).
+- **One-Tap Preselection**: Blurry and redundant duplicates are automatically pre-selected in `recommendedDeleteIds` so you can declutter entire burst series in a single tap.
+
+### 9. Swipe Tidy — Interactive Deck Sorting
+
+Lumina turns manual decluttering into an enjoyable card-stack interaction:
 
 - **Swipe Right**: Keep the photo.
 - **Swipe Left**: Move the photo into the recoverable Trash Bin.
+- **Gesture Guard**: Bottom 18% of the screen is guarded against accidental system navigation gestures.
 - **Album Filtering**: Select a specific album (e.g., *Screenshots* or *Downloads*) to clean up one collection at a time, or tidy your entire library.
 - **Direct Action Buttons**: Don't want to swipe? Use the large, accessible bottom action buttons for quick one-tap decisions.
 
-### 4. Media Viewer & Gesture Controls
+### 10. Media Viewer & Gesture Controls
 
 Viewing memories should feel natural and effortless:
 
@@ -96,7 +166,7 @@ Viewing memories should feel natural and effortless:
 - **Tap to Hide Controls**: A single tap hides all top and bottom overlays into an immersive, edge-to-edge cinema mode with high-contrast frosted backing.
 - **Swipe-Up Quick Discard**: Drag upward on any image to initiate a delete gesture, accompanied by a centered red indicator for immediate visual confirmation.
 
-### 5. Advanced Video Player
+### 11. Advanced Video Player
 
 Built on Google's **Media3 ExoPlayer** engine:
 
@@ -111,37 +181,43 @@ Built on Google's **Media3 ExoPlayer** engine:
   - `2.0x` (Fast Forward)
 - **Instant Mute Toggle**: Quickly mute or unmute audio without changing your device's master volume.
 
-### 6. EXIF Details & Metadata Privacy Stripper
+### 12. EXIF Details, GPS Maps Intent & Metadata Privacy Stripper
 
 Tap the **"i"** (Info) icon on any photo or video to open the Media Details Sheet:
 
 - **Comprehensive File Info**: File name, formatted file size (KB / MB / GB), resolution dimensions ($W \times H$), creation date & time, MIME type, and local folder path.
 - **Camera EXIF Data**: Camera manufacturer & model, lens specifications, aperture ($f$-stop), exposure time, ISO sensitivity, focal length, flash status, and GPS coordinates.
+- **Open in Maps Intent**: When EXIF GPS coordinates exist, a prominent button launches the location directly in your device's preferred navigation app (e.g. Google Maps or OpenStreetMap).
 - **In-Place File Renaming**: Rename files directly within MediaStore with immediate UI updates.
 - **Strip EXIF / Privacy Clean**: Strip location coordinates (latitude/longitude), camera model, and identifying metadata with a single tap before sharing photos to social media or messaging apps.
 
-### 7. Clean Up Assistant — Duplicate & Redundancy Scanner
+### 13. Hidden Vault — 100% Offline PIN-Protected Storage
 
-Accessible from the **Menu** popover:
+A zero-cloud, hardware-accelerated private safe built directly into Lumina:
 
-- **Cross-Folder Duplicate Detection**: Automatically identifies images sharing identical file names across different folders (e.g. `IMG_20240501.jpg` in *Camera* vs. *WhatsApp* vs. *Downloads*).
-- **Identical Size Detection**: Groups files with identical byte sizes ($> 2\text{ KB}$), surfacing duplicate downloads and copied assets.
-- **Cluster Comparison Cards**:
-  - Displays all detected copies side-by-side.
-  - Automatically badges the oldest instance as the `"Original"`.
-  - Shows folder location, file size, and timestamp for each version.
-  - One-tap selection checkboxes to delete redundant copies while safeguarding the original.
-- **Reclaimed Space Calculation**: Live counter displays the exact amount of storage space freed up (e.g., *"Frees up 142.5 MB"*).
+- **4-Digit Secure PIN**: Secured via salted SHA-256 hashing stored strictly in local private storage.
+- **Animated Numeric Keypad**: Interactive tactile dialer with spring-animated PIN dots and error-shake feedback.
+- **Stealth Protection**: Photos hidden in the vault are completely excluded and filtered out from the main Pictures grid, Albums, and Clean Up views.
+- **One-Tap Actions**: Easily hide photos from the Media Viewer or multi-select action bar, and unhide or permanently delete items inside the vault.
 
-### 8. Trash Bin & Single-Prompt Deletion
+### 14. Unified "More" Hub & Inline Settings
 
-- **Reverse Chronological Order**: Your most recently discarded photos and videos always appear at the top.
-- **Icon-Only Accessible Controls**:
-  - **Restore Button**: High-contrast, standard black circle icon (`Icons.Rounded.RestoreFromTrash`).
-  - **Delete Button**: Standard material red circle icon (`Icons.Rounded.DeleteForever`).
-- **No Double Confirmation**: Lumina eliminates frustrating duplicate dialogs. Deleting an item triggers the native **Android Scoped Storage prompt** once, keeping the process secure, compliant, and streamlined.
+Lumina consolidates management tools and preferences into a single, cohesive **"More"** dashboard without nested page hopping:
 
-### 9. Themes & Modern Aesthetics
+- **Security & Vault**: Direct cards for the PIN-protected *Hidden Vault* and *Trash Bin*.
+- **Appearance & Display**: Inline segmented selector for theme mode (`System`, `Light`, `Dark`) and quick picker for default grid density (`2`, `3`, `4`, or `5` columns).
+- **Storage & System**: Instant MediaStore permissions overview and direct developer feedback contact.
+- **About Lumina**: Version and project details.
+
+### 15. Trash Bin & Smart 4-Second Instant Undo Navigation
+
+- **Smart 4-Second Undo Snackbar**: Whenever a photo is discarded in the Media Viewer, an interactive snackbar appears for 4 seconds:
+  - Tapping **Undo** from the viewer restores the photo to storage **and immediately navigates back to focus on that restored photo in the viewer**.
+  - Restoring items from inside the *Trash Bin* restores them silently in place without disrupting your viewing.
+- **Reverse Chronological Order**: Your most recently discarded photos and videos always appear at the top of the bin.
+- **Single-Prompt Deletion**: Deleting an item triggers the native **Android Scoped Storage prompt** once, keeping the process secure, compliant, and streamlined.
+
+### 16. Themes & Modern Aesthetics
 
 - **Dynamic Theme Modes**:
   - `System Default`: Follows your Android OS dark/light schedule.
@@ -170,15 +246,16 @@ app/
 ├── src/main/java/com/swipegallery/app/
 │   ├── MainActivity.kt          # Single-activity entry point with edge-to-edge system bars
 │   ├── GalleryApp.kt            # Core root composable, navigation state, and MediaStore query engine
-│   ├── GalleryScreens.kt        # Pictures grid, Albums, Swipe deck, Trash bin, and Menu popover
+│   ├── GalleryScreens.kt        # Pictures grid, Albums, Unified More hub, and modern fast scrollbar
 │   ├── GalleryModels.kt         # Data classes (Photo, MediaSort, MediaGroup, Page, DuplicateCluster)
 │   ├── GalleryTheme.kt          # Material 3 ColorScheme, dynamic typography, and dark/light palettes
-│   ├── CleanUpScreen.kt         # Duplicate clustering algorithm and batch deletion UI
+│   ├── VaultScreen.kt           # PIN setup/unlock, encrypted vault grid, and security actions
+│   ├── CleanUpScreen.kt         # Swipe Tidy deck + Hybrid ML burst & duplicate clustering (dHash + Laplacian)
 │   ├── MediaDetailsHelper.kt    # EXIF extraction, in-place renaming, and metadata stripping
-│   ├── MediaDialogs.kt          # Sort & Group dialog, Move dialog, and file management sheets
+│   ├── MediaDialogs.kt          # Sort & Group dialog, Move dialog, and GPS Open in Maps intent
 │   ├── VideoPlayer.kt           # Media3 ExoPlayer custom playback controls and surface
-│   ├── SettingsScreen.kt        # Theme options, permissions overview, and developer profile
-│   └── SelectionUi.kt           # Multi-select top/bottom action bars
+│   ├── SettingsScreen.kt        # Standalone settings dialogs and developer profile
+│   └── SelectionUi.kt           # Multi-select drag gestures and top/bottom action bars
 └── src/main/res/                # Vector drawables, mipmap launcher icons, and styles
 ```
 
@@ -232,7 +309,7 @@ To compile the release APK with full R8 optimization, minification, and resource
 
 Output location:
 ```text
-app/build/outputs/apk/release/app-release-unsigned.apk
+app/build/outputs/apk/release/app-release.apk
 ```
 
 ---
@@ -263,7 +340,7 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
   --ks lumina-release-key.jks \
   --ks-key-alias lumina_key \
   --out app/build/outputs/apk/release/Lumina-release.apk \
-  app/build/outputs/apk/release/app-release-unsigned.apk
+  app/build/outputs/apk/release/app-release.apk
 ```
 
 #### 3. Verify Signature

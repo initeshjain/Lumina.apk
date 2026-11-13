@@ -39,6 +39,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -383,21 +384,27 @@ internal fun MediaDetailsSheet(
                     DetailSectionCard(title = "LOCATION") {
                         DetailRow("Coordinates", "${String.format(java.util.Locale.US, "%.5f", d.latitude)}, ${String.format(java.util.Locale.US, "%.5f", d.longitude)}")
                         d.altitude?.let { DetailRow("Altitude", "${it.toInt()} m") }
-                        Spacer(Modifier.height(4.dp))
-                        TextButton(
+                        Spacer(Modifier.height(10.dp))
+                        FilledTonalButton(
                             onClick = {
-                                val uri = Uri.parse("geo:${d.latitude},${d.longitude}?q=${d.latitude},${d.longitude}")
+                                val uri = Uri.parse("geo:${d.latitude},${d.longitude}?q=${d.latitude},${d.longitude}(${Uri.encode(photo.name)})")
                                 val intent = Intent(Intent.ACTION_VIEW, uri)
                                 try {
                                     context.startActivity(intent)
                                 } catch (_: Exception) {
                                     Toast.makeText(context, "No maps app installed", Toast.LENGTH_SHORT).show()
                                 }
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = colors.green.copy(alpha = 0.15f),
+                                contentColor = colors.green
+                            )
                         ) {
-                            Icon(Icons.Rounded.LocationOn, null, tint = colors.green, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Open in Maps", color = colors.green, fontSize = 12.sp)
+                            Icon(Icons.Rounded.LocationOn, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Open in Maps", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                     }
                 }

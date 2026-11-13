@@ -1,5 +1,8 @@
 package com.swipegallery.app
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,6 +17,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,76 +25,273 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
 
-data class DuplicateCluster(
+/**
+ * Result of ML analysis on a photo:
+ * - dHash: 64-bit gradient difference hash
+ * - sharpnessScore: Laplacian variance normalized (0-100)
+ */
+internal data class PhotoMlMetrics(
+    val dHash: Long,
+    val sharpnessScore: Int
+)
+
+internal data class ScoredPhoto(
+    val photo: Photo,
+    val metrics: PhotoMlMetrics?,
+    val isBestShot: Boolean = false
+)
+
+internal enum class ClusterType {
+    BurstSequence,
+    IdenticalName,
+    IdenticalSize
+}
+
+internal data class DuplicateCluster(
     val id: String,
     val title: String,
     val subtitle: String,
-    val isSameName: Boolean,
-    val items: List<Photo>
+    val type: ClusterType,
+    val items: List<Photo>,
+    val scoredItems: List<ScoredPhoto> = emptyList(),
+    val recommendedDeleteIds: Set<Long> = emptySet()
 )
 
-internal fun detectDuplicateClusters(photos: List<Photo>): List<DuplicateCluster> {
-    val clusters = mutableListOf<DuplicateCluster>()
+private val metricsCache = ConcurrentHashMap<Long, PhotoMlMetrics>()
 
-    // 1. Same filename across different folders/albums
-    val byName = photos.groupBy { it.name.trim().lowercase() }
+internal fun computePhotoMetrics(context: Context, photo: Photo): PhotoMlMetrics? {
+    metricsCache[photo.id]?.let { return it }
+    return try {
+        val resolver = context.contentResolver
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = 8
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        val stream = resolver.openInputStream(photo.uri) ?: return null
+        val bmp = BitmapFactory.decodeStream(stream, null, options) ?: return null
+        stream.close()
+
+        val dHash = computeDHash(bmp)
+        val sharpness = computeLaplacianVariance(bmp)
+        bmp.recycle()
+
+        val metrics = PhotoMlMetrics(dHash = dHash, sharpnessScore = sharpness)
+        metricsCache[photo.id] = metrics
+        metrics
+    } catch (_: Exception) {
+        null
+    }
+}
+
+internal fun computeDHash(bitmap: Bitmap): Long {
+    val scaled = Bitmap.createScaledBitmap(bitmap, 9, 8, true)
+    var hash = 0L
+    for (y in 0 until 8) {
+        for (x in 0 until 8) {
+            val left = scaled.getPixel(x, y)
+            val right = scaled.getPixel(x + 1, y)
+            val lumLeft = (0.299 * ((left shr 16) and 0xFF) + 0.587 * ((left shr 8) and 0xFF) + 0.114 * (left and 0xFF)).toInt()
+            val lumRight = (0.299 * ((right shr 16) and 0xFF) + 0.587 * ((right shr 8) and 0xFF) + 0.114 * (right and 0xFF)).toInt()
+            if (lumLeft > lumRight) {
+                hash = hash or (1L shl (y * 8 + x))
+            }
+        }
+    }
+    if (scaled != bitmap) scaled.recycle()
+    return hash
+}
+
+internal fun computeLaplacianVariance(bitmap: Bitmap): Int {
+    val size = 64
+    val scaled = Bitmap.createScaledBitmap(bitmap, size, size, true)
+    val gray = Array(size) { IntArray(size) }
+    for (y in 0 until size) {
+        for (x in 0 until size) {
+            val p = scaled.getPixel(x, y)
+            gray[y][x] = (0.299 * ((p shr 16) and 0xFF) + 0.587 * ((p shr 8) and 0xFF) + 0.114 * (p and 0xFF)).toInt()
+        }
+    }
+    if (scaled != bitmap) scaled.recycle()
+
+    var sum = 0.0
+    var sumSq = 0.0
+    var count = 0
+    for (y in 1 until size - 1) {
+        for (x in 1 until size - 1) {
+            val lap = 4 * gray[y][x] - gray[y - 1][x] - gray[y + 1][x] - gray[y][x - 1] - gray[y + 1][x]
+            sum += lap
+            sumSq += (lap * lap)
+            count++
+        }
+    }
+    val mean = sum / count
+    val variance = (sumSq / count) - (mean * mean)
+    return (Math.sqrt(variance.coerceAtLeast(0.0)) * 2.8).coerceIn(15.0, 99.0).toInt()
+}
+
+internal fun hammingDistance(h1: Long, h2: Long): Int {
+    return java.lang.Long.bitCount(h1 xor h2)
+}
+
+/**
+ * Option C Hybrid ML:
+ * Step 1: EXIF timestamp proximity clustering (burst sequences <= 3s)
+ * Step 2: Perceptual dHash difference verification across gradients
+ * Step 3: 2D discrete Laplacian edge-variance sharpness scoring to crown "Best Shot"
+ */
+internal suspend fun detectHybridClusters(context: Context, photos: List<Photo>): List<DuplicateCluster> = withContext(Dispatchers.Default) {
+    val clusters = mutableListOf<DuplicateCluster>()
+    val processedPhotoIds = mutableSetOf<Long>()
+
+    // STEP 1: EXIF Timestamp Clustering (Burst sequence candidates taken within <= 3 seconds)
+    val sortedByDate = photos.filter { !it.isVideo }.sortedBy { it.date }
+    val timeClusters = mutableListOf<MutableList<Photo>>()
+    var currentGroup = mutableListOf<Photo>()
+
+    for (p in sortedByDate) {
+        if (currentGroup.isEmpty()) {
+            currentGroup.add(p)
+        } else {
+            val last = currentGroup.last()
+            if (abs(p.date - last.date) <= 3) {
+                currentGroup.add(p)
+            } else {
+                if (currentGroup.size >= 2) timeClusters.add(currentGroup)
+                currentGroup = mutableListOf(p)
+            }
+        }
+    }
+    if (currentGroup.size >= 2) timeClusters.add(currentGroup)
+
+    // STEP 2 & 3: Perceptual Hashing & Laplacian Sharpness Scoring on Burst Candidates
+    for ((index, burstCandidates) in timeClusters.withIndex()) {
+        val scoredList = mutableListOf<ScoredPhoto>()
+        for (photo in burstCandidates) {
+            val metrics = computePhotoMetrics(context, photo)
+            scoredList.add(ScoredPhoto(photo, metrics, isBestShot = false))
+        }
+
+        var isVisualBurst = false
+        if (scoredList.size >= 2) {
+            val firstHash = scoredList.first().metrics?.dHash
+            if (firstHash != null) {
+                val similarCount = scoredList.count { item ->
+                    val h = item.metrics?.dHash
+                    h != null && hammingDistance(firstHash, h) <= 14
+                }
+                if (similarCount >= 2) isVisualBurst = true
+            }
+        }
+
+        if (isVisualBurst) {
+            val best = scoredList.maxByOrNull { it.metrics?.sharpnessScore ?: 0 }
+            val finalScored = scoredList.map { item ->
+                item.copy(isBestShot = item.photo.id == best?.photo?.id)
+            }
+            val redundantIds = finalScored.filter { !it.isBestShot }.map { it.photo.id }.toSet()
+            finalScored.forEach { processedPhotoIds.add(it.photo.id) }
+
+            clusters.add(
+                DuplicateCluster(
+                    id = "burst_$index",
+                    title = "Burst Sequence (${finalScored.size} photos)",
+                    subtitle = "AI analyzed sharpness · Best shot kept safe",
+                    type = ClusterType.BurstSequence,
+                    items = finalScored.map { it.photo },
+                    scoredItems = finalScored,
+                    recommendedDeleteIds = redundantIds
+                )
+            )
+        }
+    }
+
+    // Traditional Cross-folder name duplicates
+    val byName = photos.filter { it.id !in processedPhotoIds }.groupBy { it.name.trim().lowercase() }
     byName.forEach { (name, group) ->
         if (group.size > 1) {
             val folders = group.map { it.album }.distinct()
+            val oldest = group.minByOrNull { it.date }
+            val copies = group.filter { it.id != oldest?.id }.map { it.id }.toSet()
+            group.forEach { processedPhotoIds.add(it.id) }
+
             clusters.add(
                 DuplicateCluster(
                     id = "name_$name",
                     title = group.first().name,
                     subtitle = if (folders.size > 1) "Found in ${folders.joinToString(", ")}" else "${group.size} copies in gallery",
-                    isSameName = true,
-                    items = group.sortedByDescending { it.date }
+                    type = ClusterType.IdenticalName,
+                    items = group.sortedByDescending { it.date },
+                    recommendedDeleteIds = copies
                 )
             )
         }
     }
 
-    // 2. Exact same file size (where sizeBytes > 2048, not already clustered by same name)
-    val clusteredIds = clusters.flatMap { it.items.map { p -> p.id } }.toSet()
-    val remaining = photos.filter { it.id !in clusteredIds && it.sizeBytes > 2048L }
+    // Traditional Identical file size duplicates
+    val remaining = photos.filter { it.id !in processedPhotoIds && it.sizeBytes > 2048L }
     val bySize = remaining.groupBy { it.sizeBytes }
     bySize.forEach { (size, group) ->
         if (group.size > 1) {
+            val oldest = group.minByOrNull { it.date }
+            val copies = group.filter { it.id != oldest?.id }.map { it.id }.toSet()
             clusters.add(
                 DuplicateCluster(
                     id = "size_$size",
                     title = "Identical size: ${formatFileSize(size)}",
-                    subtitle = "${group.size} files with identical file size",
-                    isSameName = false,
-                    items = group.sortedByDescending { it.date }
+                    subtitle = "${group.size} files sharing identical size (${formatFileSize(size)})",
+                    type = ClusterType.IdenticalSize,
+                    items = group.sortedByDescending { it.date },
+                    recommendedDeleteIds = copies
                 )
             )
         }
     }
 
-    return clusters
+    clusters
 }
 
-/**
- * Screen to review duplicates (same names in different folders or same size) and clean them up.
- */
+enum class CleanUpTab(val label: String) {
+    SwipeTidy("Swipe Tidy"),
+    Duplicates("Duplicate Finder")
+}
+
 @Composable
 internal fun CleanUpPage(
     photos: List<Photo>,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     onPreviewPhoto: (Photo) -> Unit = {},
+    onKeepPhoto: (Photo) -> Unit = {},
+    onTrashPhoto: (Photo) -> Unit = {},
     onDeleteItems: (List<Photo>) -> Unit
 ) {
+    val context = LocalContext.current
     val colors = LocalAppColors.current
-    val clusters = remember(photos) { detectDuplicateClusters(photos) }
-    var selectedForDelete by remember(clusters) { mutableStateOf(setOf<Long>()) }
+    var currentTab by remember { mutableStateOf(CleanUpTab.SwipeTidy) }
+    var clusters by remember { mutableStateOf<List<DuplicateCluster>>(emptyList()) }
+    var isAnalyzing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(photos) {
+        isAnalyzing = true
+        clusters = detectHybridClusters(context, photos)
+        isAnalyzing = false
+    }
+
+    var selectedForDelete by remember(clusters) {
+        mutableStateOf(clusters.flatMap { it.recommendedDeleteIds }.toSet())
+    }
 
     val allClusterPhotos = remember(clusters) { clusters.flatMap { it.items }.associateBy { it.id } }
     val totalReclaimableBytes = remember(selectedForDelete, allClusterPhotos) {
@@ -99,25 +300,68 @@ internal fun CleanUpPage(
 
     Scaffold(
         containerColor = colors.canvas,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 22.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = colors.ink)
+            Column(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 22.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = colors.ink)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Clean up", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = colors.ink)
+                        Text(
+                            if (currentTab == CleanUpTab.SwipeTidy) "QUICK SORT WITH GESTURES" else "HYBRID ML DUPLICATE & BURST FINDER",
+                            fontSize = 10.sp,
+                            letterSpacing = 1.2.sp,
+                            color = colors.muted,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
-                Column(Modifier.weight(1f)) {
-                    Text("Clean up", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = colors.ink)
-                    Text("DUPLICATES & REDUNDANCIES", fontSize = 10.sp, letterSpacing = 1.2.sp, color = colors.muted, fontWeight = FontWeight.SemiBold)
+
+                // Switcher: [ Swipe Tidy ] | [ Duplicate Finder ]
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(colors.chipBackground)
+                            .padding(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CleanUpTab.entries.forEach { tab ->
+                            val active = currentTab == tab
+                            Text(
+                                text = tab.label,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (active) colors.card else Color.Transparent)
+                                    .clickable { currentTab = tab }
+                                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                                fontSize = 12.sp,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                color = if (active) colors.green else colors.muted
+                            )
+                        }
+                    }
                 }
+                Spacer(Modifier.height(4.dp))
             }
         },
         bottomBar = {
-            if (selectedForDelete.isNotEmpty()) {
+            if (currentTab == CleanUpTab.Duplicates && selectedForDelete.isNotEmpty()) {
                 Surface(
                     Modifier.fillMaxWidth(),
                     color = colors.card,
@@ -163,12 +407,31 @@ internal fun CleanUpPage(
             }
         }
     ) { padding ->
-        if (clusters.isEmpty()) {
+        if (currentTab == CleanUpTab.SwipeTidy) {
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                SwipePage(
+                    photos = photos,
+                    onKeep = onKeepPhoto,
+                    onTrash = onTrashPhoto,
+                    onOpen = onPreviewPhoto
+                )
+            }
+        } else if (isAnalyzing && clusters.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(modifier = Modifier.size(32.dp), color = colors.green, strokeWidth = 3.dp)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Analyzing photos with Hybrid ML...", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Checking timestamps, dHash & sharpness variance", fontSize = 11.sp, color = colors.muted)
+                }
+            }
+        } else if (clusters.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 EmptyState(
                     Icons.Rounded.CheckCircle,
                     "Everything looks tidy",
-                    "No duplicate photo names across folders or identical file sizes found in your gallery.",
+                    "No burst sequences, duplicate photo names, or redundant files found in your gallery.",
                     null
                 )
             }
@@ -178,35 +441,8 @@ internal fun CleanUpPage(
                     .fillMaxSize()
                     .padding(padding),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                item {
-                    Card(
-                        Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = colors.green.copy(alpha = 0.12f))
-                    ) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.AutoAwesome, null, tint = colors.green, modifier = Modifier.size(26.dp))
-                            Spacer(Modifier.width(14.dp))
-                            Column {
-                                Text(
-                                    "${clusters.size} duplicate sets detected",
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.ink,
-                                    fontSize = 14.sp
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    "Tap to select redundant copies. One original is kept safe.",
-                                    fontSize = 12.sp,
-                                    color = colors.muted
-                                )
-                            }
-                        }
-                    }
-                }
-
                 items(clusters, key = { it.id }) { cluster ->
                     Card(
                         Modifier.fillMaxWidth(),
@@ -217,28 +453,52 @@ internal fun CleanUpPage(
                         Column(Modifier.padding(14.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(
-                                        cluster.title,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = colors.ink,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            cluster.title,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = colors.ink,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (cluster.type == ClusterType.BurstSequence) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                "⚡ Hybrid ML",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.green,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(colors.green.copy(alpha = 0.12f))
+                                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
                                     Text(cluster.subtitle, fontSize = 11.sp, color = colors.muted)
                                 }
                                 TextButton(
                                     onClick = {
-                                        // Auto-select all except the first (oldest/primary)
-                                        val toSelect = cluster.items.drop(1).map { it.id }.toSet()
-                                        selectedForDelete = if (cluster.items.drop(1).all { it.id in selectedForDelete }) {
-                                            selectedForDelete - toSelect
+                                        val candidates = if (cluster.type == ClusterType.BurstSequence) {
+                                            cluster.scoredItems.filter { !it.isBestShot }.map { it.photo.id }.toSet()
                                         } else {
-                                            selectedForDelete + toSelect
+                                            cluster.items.drop(1).map { it.id }.toSet()
+                                        }
+                                        selectedForDelete = if (candidates.all { it in selectedForDelete }) {
+                                            selectedForDelete - candidates
+                                        } else {
+                                            selectedForDelete + candidates
                                         }
                                     }
                                 ) {
-                                    val allSelected = cluster.items.drop(1).all { it.id in selectedForDelete }
+                                    val candidates = if (cluster.type == ClusterType.BurstSequence) {
+                                        cluster.scoredItems.filter { !it.isBestShot }.map { it.photo.id }.toSet()
+                                    } else {
+                                        cluster.items.drop(1).map { it.id }.toSet()
+                                    }
+                                    val allSelected = candidates.isNotEmpty() && candidates.all { it in selectedForDelete }
                                     Text(if (allSelected) "Deselect" else "Select copies", fontSize = 12.sp, color = colors.green)
                                 }
                             }
@@ -249,7 +509,8 @@ internal fun CleanUpPage(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 cluster.items.forEachIndexed { index, photo ->
                                     val isSelected = photo.id in selectedForDelete
-                                    val isPrimary = index == 0
+                                    val scoredItem = cluster.scoredItems.firstOrNull { it.photo.id == photo.id }
+                                    val isBest = scoredItem?.isBestShot ?: (index == 0 && cluster.type != ClusterType.BurstSequence)
 
                                     Row(
                                         Modifier
@@ -303,16 +564,29 @@ internal fun CleanUpPage(
                                                     overflow = TextOverflow.Ellipsis,
                                                     modifier = Modifier.weight(1f, fill = false)
                                                 )
-                                                if (isPrimary && !isSelected) {
+                                                if (isBest) {
                                                     Spacer(Modifier.width(6.dp))
                                                     Text(
-                                                        "Original",
+                                                        if (cluster.type == ClusterType.BurstSequence) "⭐ Best Shot" else "Original",
                                                         fontSize = 10.sp,
                                                         color = colors.green,
                                                         fontWeight = FontWeight.Bold,
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(6.dp))
                                                             .background(colors.green.copy(alpha = 0.15f))
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                } else if (cluster.type == ClusterType.BurstSequence) {
+                                                    Spacer(Modifier.width(6.dp))
+                                                    val score = scoredItem?.metrics?.sharpnessScore
+                                                    Text(
+                                                        if (score != null) "Blurry ($score%)" else "Redundant",
+                                                        fontSize = 10.sp,
+                                                        color = colors.red,
+                                                        fontWeight = FontWeight.Medium,
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(colors.red.copy(alpha = 0.12f))
                                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                                     )
                                                 }

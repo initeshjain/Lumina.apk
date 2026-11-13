@@ -40,27 +40,38 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -195,11 +206,54 @@ fun GalleryApp() {
     var videoDetailsPhoto by remember { mutableStateOf<Photo?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var viewingTrash by remember { mutableStateOf(false) }
-    var viewingCleanUp by remember { mutableStateOf(false) }
-    var menuOpen by remember { mutableStateOf(false) }
+    var vaultPinHash by remember { mutableStateOf(prefs.getString("vault_pin_hash", null)) }
+    var vaultPhotoIds by remember {
+        mutableStateOf(prefs.getStringSet("vault_photo_ids", emptySet())?.toSet() ?: emptySet())
+    }
+    var viewingVault by remember { mutableStateOf(false) }
+
+    fun hidePhotos(ids: Collection<Long>) {
+        val stringIds = ids.map { it.toString() }
+        val newSet = vaultPhotoIds + stringIds
+        vaultPhotoIds = newSet
+        prefs.edit().putStringSet("vault_photo_ids", newSet).apply()
+        val count = ids.size
+        Toast.makeText(context, "Moved $count ${if (count == 1) "photo" else "photos"} to Hidden Vault", Toast.LENGTH_SHORT).show()
+    }
+
+    fun unhidePhoto(photo: Photo) {
+        val newSet = vaultPhotoIds - photo.id.toString()
+        vaultPhotoIds = newSet
+        prefs.edit().putStringSet("vault_photo_ids", newSet).apply()
+        Toast.makeText(context, "Restored to gallery", Toast.LENGTH_SHORT).show()
+    }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    var isHeaderVisible by remember { mutableStateOf(true) }
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                if (delta < -14f && isHeaderVisible) {
+                    isHeaderVisible = false
+                } else if (delta > 14f && !isHeaderVisible) {
+                    isHeaderVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var mediaFilter by remember { mutableStateOf(MediaFilter.All) }
+    var gridColumns by remember {
+        mutableIntStateOf(prefs.getInt("grid_columns", 3).coerceIn(1, 6))
+    }
+    fun updateGridColumns(newCols: Int) {
+        val clamped = newCols.coerceIn(1, 6)
+        gridColumns = clamped
+        prefs.edit().putInt("grid_columns", clamped).apply()
+    }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var moveDialogOpen by remember { mutableStateOf(false) }
     var pendingMove by remember { mutableStateOf<Pair<List<Photo>, String>?>(null) }
@@ -374,7 +428,8 @@ fun GalleryApp() {
         if (!hasAccess && hasMediaAccess(context)) onAccessGranted()
     }
 
-    val visiblePhotos = photos.filter { it.id.toString() !in trashIds }
+    val visiblePhotos = photos.filter { it.id.toString() !in trashIds && it.id.toString() !in vaultPhotoIds }
+    val vaultPhotos = photos.filter { it.id.toString() in vaultPhotoIds }
     // In trash bin, sort by reverse order: newest trashed item is on top!
     val trashed = photos.filter { it.id.toString() in trashIds }.sortedBy {
         val idx = trashOrder.indexOf(it.id.toString())
@@ -400,18 +455,17 @@ fun GalleryApp() {
     val selectedItems = gridItems.filter { it.id in selectedIds }
     val selecting = selectedIds.isNotEmpty() && page == Page.Photos && selectedPhoto == null
     fun clearSelection() { selectedIds = emptySet() }
-    val canNavigateBack = menuOpen || viewingCleanUp || viewingTrash || isSearching || searchQuery.isNotEmpty() || videoDetailsPhoto != null || playingVideo != null || previewPhoto != null || selecting || showSettings || selectedPhoto != null || selectedAlbum != null || page != Page.Photos
+    val canNavigateBack = viewingVault || viewingTrash || isSearching || searchQuery.isNotEmpty() || videoDetailsPhoto != null || playingVideo != null || previewPhoto != null || selecting || showSettings || selectedPhoto != null || selectedAlbum != null || page != Page.Photos
 
     BackHandler(enabled = canNavigateBack) {
         when {
-            menuOpen -> menuOpen = false
             videoDetailsPhoto != null -> videoDetailsPhoto = null
             playingVideo != null -> playingVideo = null
             previewPhoto != null -> previewPhoto = null
             selecting -> clearSelection()
             showSettings -> showSettings = false
+            viewingVault -> viewingVault = false
             viewingTrash -> viewingTrash = false
-            viewingCleanUp -> viewingCleanUp = false
             selectedPhoto != null -> selectedPhoto = null
             isSearching || searchQuery.isNotEmpty() -> {
                 isSearching = false
@@ -435,14 +489,20 @@ fun GalleryApp() {
                         onBack = { showSettings = false }
                     )
                 }
-                viewingCleanUp -> {
-                    CleanUpPage(
-                        photos = visiblePhotos,
-                        onBack = { viewingCleanUp = false },
+                viewingVault -> {
+                    VaultScreen(
+                        savedPinHash = vaultPinHash,
+                        vaultPhotos = vaultPhotos,
+                        onSaveNewPin = { newHash ->
+                            vaultPinHash = newHash
+                            prefs.edit().putString("vault_pin_hash", newHash).apply()
+                        },
+                        onBack = { viewingVault = false },
                         onPreviewPhoto = { photo ->
                             if (photo.isVideo) playingVideo = photo else previewPhoto = photo
                         },
-                        onDeleteItems = { items -> permanentlyDelete(items) }
+                        onUnhidePhoto = { photo -> unhidePhoto(photo) },
+                        onDeletePhoto = { photo -> permanentlyDelete(listOf(photo)) }
                     )
                 }
                 viewingTrash -> {
@@ -497,188 +557,250 @@ fun GalleryApp() {
                                         selectedIds = if (selectedItems.size == gridItems.size) emptySet() else gridItems.map { it.id }.toSet()
                                     }
                                 )
-                            } else if (selectedPhoto == null) {
-                            Header(
-                                page = page,
-                                count = gridItems.size,
-                                album = selectedAlbum,
-                                isSearching = isSearching,
-                                onToggleSearch = {
-                                    isSearching = !isSearching
-                                    if (!isSearching) searchQuery = ""
+                            } else if (selectedPhoto == null && (page == Page.Photos || page == Page.Albums)) {
+                                AnimatedVisibility(
+                                    visible = isHeaderVisible || isSearching || searchQuery.isNotEmpty() || page == Page.Albums,
+                                    enter = expandVertically(tween(220, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
+                                    exit = shrinkVertically(tween(220, easing = FastOutSlowInEasing)) + fadeOut(tween(160))
+                                ) {
+                                    Column {
+                                        Header(
+                                            page = page,
+                                            count = gridItems.size,
+                                            album = selectedAlbum,
+                                            isSearching = isSearching,
+                                            onToggleSearch = {
+                                                isSearching = !isSearching
+                                                if (!isSearching) searchQuery = ""
+                                            }
+                                        ) {
+                                            clearSelection()
+                                            if (isSearching) {
+                                                isSearching = false
+                                                searchQuery = ""
+                                            }
+                                            if (selectedAlbum != null) { selectedAlbum = null; page = Page.Albums }
+                                            else page = Page.Photos
+                                        }
+
+                                        AnimatedVisibility(
+                                            visible = isSearching && (page == Page.Photos || selectedAlbum != null),
+                                            enter = fadeIn(tween(180)) + expandVertically(),
+                                            exit = fadeOut(tween(140)) + shrinkVertically()
+                                        ) {
+                                            SearchBar(
+                                                query = searchQuery,
+                                                onQueryChange = { searchQuery = it }
+                                            )
+                                        }
+                                    }
                                 }
-                            ) {
-                                clearSelection()
-                                if (isSearching) {
-                                    isSearching = false
-                                    searchQuery = ""
-                                }
-                                if (selectedAlbum != null) { selectedAlbum = null; page = Page.Albums }
-                                else page = Page.Photos
                             }
 
-                            AnimatedVisibility(
-                                visible = isSearching && (page == Page.Photos || selectedAlbum != null),
-                                enter = fadeIn(tween(180)) + expandVertically(),
-                                exit = fadeOut(tween(140)) + shrinkVertically()
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .then(if (page == Page.Photos && selectedPhoto == null) Modifier.nestedScroll(nestedScrollConnection) else Modifier)
                             ) {
-                                SearchBar(
-                                    query = searchQuery,
-                                    onQueryChange = { searchQuery = it }
-                                )
-                            }
-                        }
-
-                        Box(Modifier.weight(1f).fillMaxWidth()) {
-                            when {
-                                loading && photos.isEmpty() -> AppSplashScreen(Modifier.align(Alignment.Center))
-                                !hasAccess -> PermissionEmpty(
-                                    blocked = accessBlocked,
-                                    onGrant = { requestAccess() },
-                                    onOpenSettings = { openAppSettings(context) }
-                                )
-                                else -> AnimatedContent(
-                                    targetState = page,
-                                    transitionSpec = {
-                                        (fadeIn(tween(180)) + slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 18 }) togetherWith
-                                            (fadeOut(tween(140)) + slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 18 })
-                                    },
-                                    label = "section navigation"
-                                ) { visiblePage ->
-                                    when (visiblePage) {
-                                        Page.Photos -> AnimatedContent(
-                                            targetState = selectedPhoto,
-                                            contentKey = { it != null },
-                                            transitionSpec = {
-                                                if (targetState == null) {
-                                                    (fadeIn(tween(220)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { -it / 8 }) togetherWith
-                                                        (fadeOut(tween(180)) + slideOutVertically(tween(240)) { it / 5 })
+                                when {
+                                    loading && photos.isEmpty() -> AppSplashScreen(Modifier.align(Alignment.Center))
+                                    !hasAccess -> PermissionEmpty(
+                                        blocked = accessBlocked,
+                                        onGrant = { requestAccess() },
+                                        onOpenSettings = { openAppSettings(context) }
+                                    )
+                                    else -> AnimatedContent(
+                                        targetState = page,
+                                        transitionSpec = {
+                                            (fadeIn(tween(180)) + slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 18 }) togetherWith
+                                                (fadeOut(tween(140)) + slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 18 })
+                                        },
+                                        label = "section navigation"
+                                    ) { visiblePage ->
+                                        when (visiblePage) {
+                                            Page.Photos -> AnimatedContent(
+                                                targetState = selectedPhoto,
+                                                contentKey = { it != null },
+                                                transitionSpec = {
+                                                    if (targetState == null) {
+                                                        (fadeIn(tween(220)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { -it / 8 }) togetherWith
+                                                            (fadeOut(tween(180)) + slideOutVertically(tween(240)) { it / 5 })
+                                                    } else {
+                                                        (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 5 }) togetherWith
+                                                            (fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it / 6 })
+                                                    }
+                                                },
+                                                label = "photo viewer navigation"
+                                            ) { openingPhoto ->
+                                                if (openingPhoto == null) {
+                                                    PhotoGrid(
+                                                        photos = gridItems,
+                                                        filter = mediaFilter,
+                                                        onFilter = { mediaFilter = it },
+                                                        sort = mediaSort,
+                                                        group = mediaGroup,
+                                                        onGroupChange = { updateSortAndGroup(mediaSort, it) },
+                                                        onOpenSortGroup = { sortGroupDialogOpen = true },
+                                                        selectedIds = if (selecting) selectedIds else emptySet(),
+                                                        favoriteIds = favoriteIds,
+                                                        onPhoto = { photo ->
+                                                            if (selecting) {
+                                                                selectedIds = if (photo.id in selectedIds) selectedIds - photo.id else selectedIds + photo.id
+                                                            } else {
+                                                                selectedPhoto = photo
+                                                            }
+                                                        },
+                                                        onLongPress = { photo -> selectedIds = selectedIds + photo.id },
+                                                        empty = !loading,
+                                                        searchQuery = searchQuery,
+                                                        gridColumns = gridColumns,
+                                                        onGridColumnsChange = { updateGridColumns(it) }
+                                                    )
                                                 } else {
-                                                    (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 5 }) togetherWith
-                                                        (fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it / 6 })
+                                                    PhotoDetail(
+                                                        initialPhoto = openingPhoto,
+                                                        photos = gridItems,
+                                                        favoriteIds = favoriteIds,
+                                                        onToggleFavorite = { toggleFavorite(it) },
+                                                        onClose = { selectedPhoto = null },
+                                                        onPlay = { playingVideo = it },
+                                                        onTrash = { photo ->
+                                                            val index = gridItems.indexOfFirst { it.id == photo.id }
+                                                            val remaining = gridItems.filter { it.id != photo.id }
+                                                            val photoIdStr = photo.id.toString()
+                                                            addToTrash(listOf(photoIdStr))
+                                                            selectedPhoto = remaining.getOrNull(index) ?: remaining.lastOrNull()
+                                                            scope.launch {
+                                                                snackbarHostState.currentSnackbarData?.dismiss()
+                                                                val result = snackbarHostState.showSnackbar(
+                                                                    message = "Moved 1 photo to bin",
+                                                                    actionLabel = "Undo",
+                                                                    duration = SnackbarDuration.Short
+                                                                )
+                                                                if (result == SnackbarResult.ActionPerformed) {
+                                                                    removeFromTrash(listOf(photoIdStr))
+                                                                    selectedPhoto = photo
+                                                                }
+                                                            }
+                                                        },
+                                                        onHide = { photo ->
+                                                            val index = gridItems.indexOfFirst { it.id == photo.id }
+                                                            val remaining = gridItems.filter { it.id != photo.id }
+                                                            hidePhotos(listOf(photo.id))
+                                                            selectedPhoto = remaining.getOrNull(index) ?: remaining.lastOrNull()
+                                                        },
+                                                        onRenamed = { _, _ -> scope.launch { loadPhotos() } },
+                                                        onMetadataStripped = { _ -> scope.launch { loadPhotos() } },
+                                                        onShare = { share(listOf(it)) }
+                                                    )
                                                 }
-                                            },
-                                            label = "photo viewer navigation"
-                                        ) { openingPhoto ->
-                                            if (openingPhoto == null) {
-                                                PhotoGrid(
-                                                    photos = gridItems,
-                                                    filter = mediaFilter,
-                                                    onFilter = { mediaFilter = it },
-                                                    sort = mediaSort,
-                                                    group = mediaGroup,
-                                                    onGroupChange = { updateSortAndGroup(mediaSort, it) },
-                                                    onOpenSortGroup = { sortGroupDialogOpen = true },
-                                                    selectedIds = if (selecting) selectedIds else emptySet(),
-                                                    favoriteIds = favoriteIds,
-                                                    onPhoto = { photo ->
-                                                        if (selecting) {
-                                                            selectedIds = if (photo.id in selectedIds) selectedIds - photo.id else selectedIds + photo.id
-                                                        } else {
-                                                            selectedPhoto = photo
+                                            }
+                                            Page.Albums -> Albums(
+                                                photos = visiblePhotos,
+                                                favoritePhotos = visiblePhotos.filter { it.id in favoriteIds },
+                                                gridColumns = gridColumns,
+                                                onGridColumnsChange = { updateGridColumns(it) },
+                                                onAlbum = { clearSelection(); selectedAlbum = it; page = Page.Photos },
+                                                onOpenFavorites = { clearSelection(); page = Page.Photos; mediaFilter = MediaFilter.Favorites },
+                                                onPhoto = { photo -> selectedPhoto = photo }
+                                            )
+                                            Page.CleanUp -> CleanUpPage(
+                                                photos = visiblePhotos,
+                                                onBack = { page = Page.Photos },
+                                                onPreviewPhoto = { photo -> if (photo.isVideo) playingVideo = photo else previewPhoto = photo },
+                                                onTrashPhoto = { photo ->
+                                                    val photoIdStr = photo.id.toString()
+                                                    addToTrash(listOf(photoIdStr))
+                                                    scope.launch {
+                                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                                        val result = snackbarHostState.showSnackbar(
+                                                            message = "Moved 1 photo to bin",
+                                                            actionLabel = "Undo",
+                                                            duration = SnackbarDuration.Short
+                                                        )
+                                                        if (result == SnackbarResult.ActionPerformed) {
+                                                            removeFromTrash(listOf(photoIdStr))
                                                         }
-                                                    },
-                                                    onLongPress = { photo -> selectedIds = selectedIds + photo.id },
-                                                    empty = !loading,
-                                                    searchQuery = searchQuery
-                                                )
-                                            } else {
-                                                PhotoDetail(
-                                                    initialPhoto = openingPhoto,
-                                                    photos = gridItems,
-                                                    favoriteIds = favoriteIds,
-                                                    onToggleFavorite = { toggleFavorite(it) },
-                                                    onClose = { selectedPhoto = null },
-                                                    onPlay = { playingVideo = it },
-                                                    onTrash = { photo ->
-                                                        val index = gridItems.indexOfFirst { it.id == photo.id }
-                                                        val remaining = gridItems.filter { it.id != photo.id }
-                                                        addToTrash(listOf(photo.id.toString()))
-                                                        selectedPhoto = remaining.getOrNull(index) ?: remaining.lastOrNull()
-                                                    },
-                                                    onRenamed = { _, _ -> scope.launch { loadPhotos() } },
-                                                    onMetadataStripped = { _ -> scope.launch { loadPhotos() } },
-                                                    onShare = { share(listOf(it)) }
-                                                )
+                                                    }
+                                                },
+                                                onDeleteItems = { items -> permanentlyDelete(items) }
+                                            )
+                                            Page.More -> MorePage(
+                                                trashedCount = trashed.size,
+                                                vaultCount = vaultPhotos.size,
+                                                currentTheme = themeMode,
+                                                gridColumns = gridColumns,
+                                                hasAccess = hasAccess,
+                                                onThemeChange = { updateTheme(it) },
+                                                onGridColumnsChange = { updateGridColumns(it) },
+                                                onOpenTrash = { viewingTrash = true },
+                                                onOpenVault = { viewingVault = true }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (selecting) {
+                                SelectionActionBar(
+                                    enabled = selectedItems.isNotEmpty(),
+                                    canMove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R,
+                                    onShare = { share(selectedItems) },
+                                    onMove = { moveDialogOpen = true },
+                                    onHide = {
+                                        val toHide = selectedItems.map { it.id }
+                                        hidePhotos(toHide)
+                                        clearSelection()
+                                    },
+                                    onDelete = {
+                                        val toTrash = selectedItems.map { it.id.toString() }
+                                        val count = selectedItems.size
+                                        addToTrash(toTrash)
+                                        clearSelection()
+                                        scope.launch {
+                                            snackbarHostState.currentSnackbarData?.dismiss()
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "Moved $count ${if (count == 1) "item" else "items"} to bin",
+                                                actionLabel = "Undo",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                removeFromTrash(toTrash)
                                             }
                                         }
-                                        Page.Albums -> Albums(
-                                            photos = visiblePhotos,
-                                            favoritePhotos = visiblePhotos.filter { it.id in favoriteIds },
-                                            onAlbum = { clearSelection(); selectedAlbum = it; page = Page.Photos },
-                                            onOpenFavorites = { clearSelection(); page = Page.Photos; mediaFilter = MediaFilter.Favorites }
-                                        )
-                                        Page.Swipe -> SwipePage(
-                                            photos = visiblePhotos,
-                                            onKeep = {},
-                                            onTrash = { photo -> addToTrash(listOf(photo.id.toString())) },
-                                            onOpen = { photo -> if (photo.isVideo) playingVideo = photo else previewPhoto = photo }
-                                        )
                                     }
-                                }
+                                )
+                            } else if (selectedPhoto == null) {
+                                BottomBar(
+                                    page = page,
+                                    onPage = {
+                                        clearSelection()
+                                        if (it != Page.Photos) {
+                                            isSearching = false
+                                            searchQuery = ""
+                                        }
+                                        page = it
+                                        selectedAlbum = null
+                                    }
+                                )
                             }
                         }
 
-                        if (selecting) {
-                            SelectionActionBar(
-                                enabled = selectedItems.isNotEmpty(),
-                                canMove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R,
-                                onShare = { share(selectedItems) },
-                                onMove = { moveDialogOpen = true },
-                                onDelete = {
-                                    addToTrash(selectedItems.map { it.id.toString() })
-                                    val count = selectedItems.size
-                                    clearSelection()
-                                    Toast.makeText(context, "Moved $count ${if (count == 1) "item" else "items"} to the bin", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        } else if (selectedPhoto == null) {
-                            BottomBar(
-                                page = page,
-                                menuOpen = menuOpen,
-                                onPage = {
-                                    clearSelection()
-                                    menuOpen = false
-                                    if (it != Page.Photos) {
-                                        isSearching = false
-                                        searchQuery = ""
-                                    }
-                                    page = it
-                                    selectedAlbum = null
-                                },
-                                onToggleMenu = {
-                                    menuOpen = !menuOpen
-                                }
+                        SnackbarHost(
+                            hostState = snackbarHostState,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = if (selectedPhoto == null && !selecting) 90.dp else 16.dp)
+                        ) { data ->
+                            Snackbar(
+                                snackbarData = data,
+                                containerColor = colors.ink,
+                                contentColor = colors.canvas,
+                                actionColor = colors.green,
+                                shape = RoundedCornerShape(14.dp)
                             )
                         }
-                    }
-
-                    if (menuOpen) {
-                        val duplicatesCount = remember(visiblePhotos) { detectDuplicateClusters(visiblePhotos).size }
-                        MenuPopover(
-                            trashedCount = trashed.size,
-                            favoritesCount = favoriteIds.size,
-                            duplicatesCount = duplicatesCount,
-                            onDismiss = { menuOpen = false },
-                            onOpenCleanUp = {
-                                menuOpen = false
-                                viewingCleanUp = true
-                            },
-                            onOpenTrash = {
-                                menuOpen = false
-                                viewingTrash = true
-                            },
-                            onOpenFavorites = {
-                                menuOpen = false
-                                clearSelection()
-                                page = Page.Photos
-                                mediaFilter = MediaFilter.Favorites
-                            },
-                            onOpenSettings = {
-                                menuOpen = false
-                                showSettings = true
-                            }
-                        )
                     }
                 }
             }
@@ -738,5 +860,4 @@ fun GalleryApp() {
                 )
             }
         }
-    }
 }
