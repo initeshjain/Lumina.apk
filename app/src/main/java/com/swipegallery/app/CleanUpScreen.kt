@@ -3,6 +3,9 @@ package com.swipegallery.app
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
+import android.provider.MediaStore
+import android.util.Size
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,17 +77,44 @@ internal data class DuplicateCluster(
 
 private val metricsCache = ConcurrentHashMap<Long, PhotoMlMetrics>()
 
+/**
+ * Computes perceptual metrics using hardware-accelerated system thumbnails.
+ * Never decodes raw high-res files from disk, avoiding memory spikes & OOM crashes on large galleries.
+ */
 internal fun computePhotoMetrics(context: Context, photo: Photo): PhotoMlMetrics? {
     metricsCache[photo.id]?.let { return it }
     return try {
         val resolver = context.contentResolver
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = 8
-            inPreferredConfig = Bitmap.Config.RGB_565
+        val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                resolver.loadThumbnail(photo.uri, Size(96, 96), null)
+            } catch (_: Throwable) {
+                null
+            }
+        } else {
+            try {
+                @Suppress("DEPRECATION")
+                MediaStore.Images.Thumbnails.getThumbnail(
+                    resolver,
+                    photo.id,
+                    MediaStore.Images.Thumbnails.MINI_KIND,
+                    null
+                )
+            } catch (_: Throwable) {
+                null
+            }
+        } ?: run {
+            // Lightweight fallback if system thumbnail is unavailable
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = 16
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            resolver.openInputStream(photo.uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
         }
-        val stream = resolver.openInputStream(photo.uri) ?: return null
-        val bmp = BitmapFactory.decodeStream(stream, null, options) ?: return null
-        stream.close()
+
+        if (bmp == null) return null
 
         val dHash = computeDHash(bmp)
         val sharpness = computeLaplacianVariance(bmp)
@@ -91,12 +123,13 @@ internal fun computePhotoMetrics(context: Context, photo: Photo): PhotoMlMetrics
         val metrics = PhotoMlMetrics(dHash = dHash, sharpnessScore = sharpness)
         metricsCache[photo.id] = metrics
         metrics
-    } catch (_: Exception) {
+    } catch (_: Throwable) {
         null
     }
 }
 
 internal fun computeDHash(bitmap: Bitmap): Long {
+    if (bitmap.isRecycled) return 0L
     val scaled = Bitmap.createScaledBitmap(bitmap, 9, 8, true)
     var hash = 0L
     for (y in 0 until 8) {
@@ -115,7 +148,8 @@ internal fun computeDHash(bitmap: Bitmap): Long {
 }
 
 internal fun computeLaplacianVariance(bitmap: Bitmap): Int {
-    val size = 64
+    if (bitmap.isRecycled) return 50
+    val size = 48
     val scaled = Bitmap.createScaledBitmap(bitmap, size, size, true)
     val gray = Array(size) { IntArray(size) }
     for (y in 0 until size) {
@@ -131,7 +165,7 @@ internal fun computeLaplacianVariance(bitmap: Bitmap): Int {
     var count = 0
     for (y in 1 until size - 1) {
         for (x in 1 until size - 1) {
-            val lap = 4 * gray[y][x] - gray[y - 1][x] - gray[y + 1][x] - gray[y][x - 1] - gray[y + 1][x]
+            val lap = 4 * gray[y][x] - gray[y - 1][x] - gray[y + 1][x] - gray[y][x - 1] - gray[y][x + 1]
             sum += lap
             sumSq += (lap * lap)
             count++
@@ -147,54 +181,85 @@ internal fun hammingDistance(h1: Long, h2: Long): Int {
 }
 
 /**
- * Option C Hybrid ML:
- * Step 1: EXIF timestamp proximity clustering (burst sequences <= 3s)
- * Step 2: Perceptual dHash difference verification across gradients
+ * Option C Hybrid ML with O(N) candidate filtering:
+ * Step 1: EXIF timestamp proximity clustering (burst sequences <= 2.5s with total duration & group caps)
+ * Step 2: Perceptual dHash difference verification across gradients via hardware thumbnails
  * Step 3: 2D discrete Laplacian edge-variance sharpness scoring to crown "Best Shot"
  */
-internal suspend fun detectHybridClusters(context: Context, photos: List<Photo>): List<DuplicateCluster> = withContext(Dispatchers.Default) {
+internal suspend fun detectHybridClusters(
+    context: Context,
+    photos: List<Photo>,
+    onProgress: (Int, Int) -> Unit = { _, _ -> }
+): List<DuplicateCluster> = withContext(Dispatchers.Default) {
     val clusters = mutableListOf<DuplicateCluster>()
     val processedPhotoIds = mutableSetOf<Long>()
 
-    // STEP 1: EXIF Timestamp Clustering (Burst sequence candidates taken within <= 3 seconds)
-    val sortedByDate = photos.filter { !it.isVideo }.sortedBy { it.date }
-    val timeClusters = mutableListOf<MutableList<Photo>>()
-    var currentGroup = mutableListOf<Photo>()
+    // STEP 1: EXIF Timestamp Windowing with Strict Sanity Limits
+    val eligible = photos.filter { !it.isVideo }
+    val sortedByCapture = eligible.sortedBy { if (it.dateTakenMs > 0) it.dateTakenMs else it.date * 1000L }
 
-    for (p in sortedByDate) {
-        if (currentGroup.isEmpty()) {
-            currentGroup.add(p)
+    val candidateBursts = mutableListOf<List<Photo>>()
+    var currentBurst = mutableListOf<Photo>()
+
+    for (p in sortedByCapture) {
+        val pTime = if (p.dateTakenMs > 0) p.dateTakenMs else p.date * 1000L
+        if (currentBurst.isEmpty()) {
+            currentBurst.add(p)
         } else {
-            val last = currentGroup.last()
-            if (abs(p.date - last.date) <= 3) {
-                currentGroup.add(p)
+            val firstInBurst = currentBurst.first()
+            val lastInBurst = currentBurst.last()
+            val firstTime = if (firstInBurst.dateTakenMs > 0) firstInBurst.dateTakenMs else firstInBurst.date * 1000L
+            val lastTime = if (lastInBurst.dateTakenMs > 0) lastInBurst.dateTakenMs else lastInBurst.date * 1000L
+
+            // Strict sanity criteria for a genuine camera burst:
+            // 1. Same album/folder
+            // 2. Step <= 2.5 seconds between shots
+            // 3. Total span <= 8 seconds
+            // 4. Group size <= 15
+            val sameAlbum = p.album.equals(firstInBurst.album, ignoreCase = true)
+            val timeStepOk = (pTime - lastTime) in 0..2500L
+            val totalSpanOk = (pTime - firstTime) in 0..8000L
+            val sizeOk = currentBurst.size < 15
+
+            if (sameAlbum && timeStepOk && totalSpanOk && sizeOk) {
+                currentBurst.add(p)
             } else {
-                if (currentGroup.size >= 2) timeClusters.add(currentGroup)
-                currentGroup = mutableListOf(p)
+                if (currentBurst.size in 2..15) {
+                    candidateBursts.add(currentBurst.toList())
+                }
+                currentBurst = mutableListOf(p)
             }
         }
     }
-    if (currentGroup.size >= 2) timeClusters.add(currentGroup)
+    if (currentBurst.size in 2..15) {
+        candidateBursts.add(currentBurst.toList())
+    }
 
-    // STEP 2 & 3: Perceptual Hashing & Laplacian Sharpness Scoring on Burst Candidates
-    for ((index, burstCandidates) in timeClusters.withIndex()) {
+    // Limit maximum bursts to analyze in one pass to prevent runaway battery/CPU usage
+    val burstsToProcess = candidateBursts.take(50)
+    val totalPhotosToAnalyze = burstsToProcess.sumOf { it.size }
+    var analyzedCount = 0
+
+    // STEP 2 & 3: Fast Thumbnail Hashing & Sharpness Scoring on Burst Candidates ONLY
+    for ((index, burstGroup) in burstsToProcess.withIndex()) {
         val scoredList = mutableListOf<ScoredPhoto>()
-        for (photo in burstCandidates) {
+        for (photo in burstGroup) {
             val metrics = computePhotoMetrics(context, photo)
             scoredList.add(ScoredPhoto(photo, metrics, isBestShot = false))
-        }
-
-        var isVisualBurst = false
-        if (scoredList.size >= 2) {
-            val firstHash = scoredList.first().metrics?.dHash
-            if (firstHash != null) {
-                val similarCount = scoredList.count { item ->
-                    val h = item.metrics?.dHash
-                    h != null && hammingDistance(firstHash, h) <= 14
-                }
-                if (similarCount >= 2) isVisualBurst = true
+            analyzedCount++
+            if (analyzedCount % 5 == 0) {
+                onProgress(analyzedCount, totalPhotosToAnalyze)
+                yield()
             }
         }
+
+        // Check if hashes are visually similar (Hamming distance <= 12 out of 64 bits)
+        val validMetrics = scoredList.mapNotNull { it.metrics }
+        val isVisualBurst = if (validMetrics.size >= 2) {
+            val firstHash = validMetrics.first().dHash
+            val matchCount = validMetrics.count { hammingDistance(firstHash, it.dHash) <= 12 }
+            matchCount >= (validMetrics.size + 1) / 2
+        } else false
 
         if (isVisualBurst) {
             val best = scoredList.maxByOrNull { it.metrics?.sharpnessScore ?: 0 }
@@ -218,7 +283,10 @@ internal suspend fun detectHybridClusters(context: Context, photos: List<Photo>)
         }
     }
 
-    // Traditional Cross-folder name duplicates
+    onProgress(totalPhotosToAnalyze, totalPhotosToAnalyze)
+    yield()
+
+    // STEP 4: Traditional Cross-folder name duplicates (O(N) with HashMap)
     val byName = photos.filter { it.id !in processedPhotoIds }.groupBy { it.name.trim().lowercase() }
     byName.forEach { (name, group) ->
         if (group.size > 1) {
@@ -240,7 +308,7 @@ internal suspend fun detectHybridClusters(context: Context, photos: List<Photo>)
         }
     }
 
-    // Traditional Identical file size duplicates
+    // STEP 5: Traditional Identical file size duplicates (O(N) with HashMap)
     val remaining = photos.filter { it.id !in processedPhotoIds && it.sizeBytes > 2048L }
     val bySize = remaining.groupBy { it.sizeBytes }
     bySize.forEach { (size, group) ->
@@ -282,11 +350,21 @@ internal fun CleanUpPage(
     var currentTab by remember { mutableStateOf(CleanUpTab.SwipeTidy) }
     var clusters by remember { mutableStateOf<List<DuplicateCluster>>(emptyList()) }
     var isAnalyzing by remember { mutableStateOf(false) }
+    var hasScanned by remember { mutableStateOf(false) }
+    var scanCount by remember { mutableIntStateOf(0) }
+    var scanTotal by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(photos) {
-        isAnalyzing = true
-        clusters = detectHybridClusters(context, photos)
-        isAnalyzing = false
+    // ML analysis is deferred to when Duplicates tab is opened, preventing freeze on Swipe Tidy
+    LaunchedEffect(currentTab, photos) {
+        if (currentTab == CleanUpTab.Duplicates && (!hasScanned || clusters.isEmpty())) {
+            isAnalyzing = true
+            clusters = detectHybridClusters(context, photos) { count, total ->
+                scanCount = count
+                scanTotal = total
+            }
+            hasScanned = true
+            isAnalyzing = false
+        }
     }
 
     var selectedForDelete by remember(clusters) {
@@ -324,6 +402,14 @@ internal fun CleanUpPage(
                             color = colors.muted,
                             fontWeight = FontWeight.SemiBold
                         )
+                    }
+                    if (currentTab == CleanUpTab.Duplicates && !isAnalyzing) {
+                        IconButton(onClick = {
+                            hasScanned = false
+                            clusters = emptyList()
+                        }) {
+                            Icon(Icons.Rounded.Refresh, "Rescan", tint = colors.green)
+                        }
                     }
                 }
 
@@ -418,22 +504,64 @@ internal fun CleanUpPage(
             }
         } else if (isAnalyzing && clusters.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(modifier = Modifier.size(32.dp), color = colors.green, strokeWidth = 3.dp)
-                    Spacer(Modifier.height(16.dp))
-                    Text("Analyzing photos with Hybrid ML...", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-                    Spacer(Modifier.height(4.dp))
-                    Text("Checking timestamps, dHash & sharpness variance", fontSize = 11.sp, color = colors.muted)
+                Column(
+                    modifier = Modifier.padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(40.dp),
+                        color = colors.green,
+                        strokeWidth = 3.5.dp
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Text(
+                        if (scanTotal > 0) "Analyzing candidate photos ($scanCount / $scanTotal)..." else "Scanning gallery with Hybrid ML...",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.ink
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Loading hardware thumbnails & scoring optical sharpness",
+                        fontSize = 12.sp,
+                        color = colors.muted
+                    )
+                    if (scanTotal > 0) {
+                        Spacer(Modifier.height(14.dp))
+                        LinearProgressIndicator(
+                            progress = { scanCount.toFloat() / scanTotal.coerceAtLeast(1) },
+                            modifier = Modifier
+                                .width(200.dp)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = colors.green,
+                            trackColor = colors.chipBackground
+                        )
+                    }
                 }
             }
         } else if (clusters.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    Icons.Rounded.CheckCircle,
-                    "Everything looks tidy",
-                    "No burst sequences, duplicate photo names, or redundant files found in your gallery.",
-                    null
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    EmptyState(
+                        Icons.Rounded.CheckCircle,
+                        "Everything looks tidy",
+                        "No burst sequences, duplicate photo names, or redundant files found in your gallery.",
+                        null
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedButton(
+                        onClick = {
+                            hasScanned = false
+                            clusters = emptyList()
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Rescan Gallery")
+                    }
+                }
             }
         } else {
             LazyColumn(

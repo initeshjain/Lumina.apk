@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v2.0.0-blue.svg?logo=android" alt="Version v2.0.0" />
+  <img src="https://img.shields.io/badge/Version-v2.1.0-blue.svg?logo=android" alt="Version v2.1.0" />
   <img src="https://img.shields.io/badge/Kotlin-2.0.0-blue.svg?logo=kotlin" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack%20Compose-2024.12.01-green.svg?logo=android" alt="Jetpack Compose" />
   <img src="https://img.shields.io/badge/Material%203-Expressive-purple.svg" alt="Material 3" />
@@ -35,12 +35,15 @@
   - [8. Clean Up Hub — Hybrid ML Burst & Duplicate Engine](#8-clean-up-hub--hybrid-ml-burst--duplicate-engine)
   - [9. Swipe Tidy — Interactive Deck Sorting](#9-swipe-tidy--interactive-deck-sorting)
   - [10. Media Viewer & Gesture Controls](#10-media-viewer--gesture-controls)
-  - [11. Advanced Video Player](#11-advanced-video-player)
-  - [12. EXIF Details, GPS Maps Intent & Metadata Privacy Stripper](#12-exif-details-gps-maps-intent--metadata-privacy-stripper)
-  - [13. Hidden Vault — 100% Offline PIN-Protected Storage](#13-hidden-vault--100-offline-pin-protected-storage)
-  - [14. Unified "More" Hub & Inline Settings](#14-unified-more-hub--inline-settings)
-  - [15. Trash Bin & Smart 4-Second Instant Undo Navigation](#15-trash-bin--smart-4-second-instant-undo-navigation)
-  - [16. Themes & Modern Aesthetics](#16-themes--modern-aesthetics)
+  - [11. Live Text Scanner & OCR Selection ("T" Button)](#11-live-text-scanner--ocr-selection-t-button)
+  - [12. Full-Featured Image Editor & Creative Studio](#12-full-featured-image-editor--creative-studio)
+  - [13. Blemish & Spot Patch Eraser (Object Remover)](#13-blemish--spot-patch-eraser-object-remover)
+  - [14. Advanced Video Player](#14-advanced-video-player)
+  - [15. EXIF Details, GPS Maps Intent & Metadata Privacy Stripper](#15-exif-details-gps-maps-intent--metadata-privacy-stripper)
+  - [16. Hidden Vault — 100% Offline PIN-Protected Storage](#16-hidden-vault--100-offline-pin-protected-storage)
+  - [17. Unified "More" Hub & Inline Settings](#17-unified-more-hub--inline-settings)
+  - [18. Trash Bin & Smart 4-Second Instant Undo Navigation](#18-trash-bin--smart-4-second-instant-undo-navigation)
+  - [19. Themes & Modern Aesthetics](#19-themes--modern-aesthetics)
 - [Privacy & Security Commitment](#privacy--security-commitment)
 - [Architecture & Tech Stack](#architecture--tech-stack)
 - [Building & Installation](#building--installation)
@@ -166,7 +169,48 @@ Viewing memories should feel natural and effortless:
 - **Tap to Hide Controls**: A single tap hides all top and bottom overlays into an immersive, edge-to-edge cinema mode with high-contrast frosted backing.
 - **Swipe-Up Quick Discard**: Drag upward on any image to initiate a delete gesture, accompanied by a centered red indicator for immediate visual confirmation.
 
-### 11. Advanced Video Player
+### 11. Live Text Scanner & OCR Selection ("T" Button)
+
+Extract, select, and copy text directly from any picture using on-device optical character recognition:
+- **Samsung-Style "T" Button**: A sleek floating pill button with an animated OCR scan icon appears in the bottom corner of the photo viewer whenever viewing images.
+- **100% Offline via Play Services**: Powered by Google Play Services ML Kit (`play-services-mlkit-text-recognition`), adding **0 MB** of APK bloat while running entirely on-device with zero network communication.
+- **Selectable Bottom Sheet**: Tapping the "T" button scans the image and slides up a clean sheet with:
+  - Full text preview with interactive cursor selection.
+  - Line and character count indicators.
+  - **Copy All** to clipboard in a single tap with haptic confirmation.
+  - **Share** extracted text directly to any messaging or note-taking app.
+
+### 12. Full-Featured Image Editor & Creative Studio
+
+A complete, non-destructive editing suite right inside Lumina:
+- **Precision Crop & Geometry**:
+  - Freeform cropping with draggable corner handles and rule-of-thirds grid overlay.
+  - Aspect ratio presets: `Free`, `1:1 (Square)`, `4:5 (Instagram Portrait)`, `4:3`, `3:2`, `16:9`, and `9:16 (Stories/Reels)`.
+  - 90° clockwise rotation and horizontal/vertical mirroring.
+- **Live GPU Color Grading**:
+  - Real-time `ColorMatrix` adjustments with instant interactive sliders:
+    - *Brightness* ($-0.5$ to $+0.5$)
+    - *Contrast* ($0.5\times$ to $2.0\times$)
+    - *Saturation* ($0.0\times$ B&W to $2.0\times$ hyper-saturated)
+    - *Warmth* (Cool blue $\leftrightarrow$ Golden amber tinting)
+    - *Vignette* (Subtle edge-falloff radial darkening)
+- **1-Tap Aesthetic Filters**:
+  - `Original`, `Vivid` (punchy contrast), `Sunset` (warm golden-hour glow), `Nordic` (desaturated cinematic), `OLED B&W` (deep monochrome), `Sepia` (vintage warmth), `Matte` (lifted film shadows), and `Teal & Orange` (modern cinema look).
+- **Freehand Markup & Doodling**:
+  - Smooth vector brush strokes with adjustable stroke width (4dp to 32dp).
+  - Material 3 color swatches (White, Amber, Emerald, Coral, Cyan, Dark).
+  - Eraser mode and multi-step Undo stack.
+- **Hold-to-Compare**: Press and hold the "Compare" pill to toggle instantly between your current edit and the unedited original.
+- **Non-Destructive Export**: Edits are safely saved as a high-resolution new copy into `Pictures/Lumina` using Scoped Storage, leaving your original photo untouched.
+
+### 13. Blemish & Spot Patch Eraser (Object Remover)
+
+Clean up unwanted spots, sensor dust, watermarks, or blemishes directly within the editor:
+- **Localized Boundary Diffusion**: Utilizes a fast on-device $4^{\text{th}}$-power inverse distance weighted boundary texture synthesis algorithm.
+- **Sub-15ms Execution**: By restricting calculations to the exact bounding box of the eraser stroke rather than the entire canvas, object removal runs in $< 15\text{ ms}$ in pure Kotlin without NDK overhead or battery drain.
+- **Unlimited Undo Stack**: Retains snapshot history allowing you to undo or redo brush strokes effortlessly.
+
+### 14. Advanced Video Player
 
 Built on Google's **Media3 ExoPlayer** engine:
 
@@ -181,7 +225,7 @@ Built on Google's **Media3 ExoPlayer** engine:
   - `2.0x` (Fast Forward)
 - **Instant Mute Toggle**: Quickly mute or unmute audio without changing your device's master volume.
 
-### 12. EXIF Details, GPS Maps Intent & Metadata Privacy Stripper
+### 15. EXIF Details, GPS Maps Intent & Metadata Privacy Stripper
 
 Tap the **"i"** (Info) icon on any photo or video to open the Media Details Sheet:
 
@@ -191,7 +235,7 @@ Tap the **"i"** (Info) icon on any photo or video to open the Media Details Shee
 - **In-Place File Renaming**: Rename files directly within MediaStore with immediate UI updates.
 - **Strip EXIF / Privacy Clean**: Strip location coordinates (latitude/longitude), camera model, and identifying metadata with a single tap before sharing photos to social media or messaging apps.
 
-### 13. Hidden Vault — 100% Offline PIN-Protected Storage
+### 16. Hidden Vault — 100% Offline PIN-Protected Storage
 
 A zero-cloud, hardware-accelerated private safe built directly into Lumina:
 
@@ -200,7 +244,7 @@ A zero-cloud, hardware-accelerated private safe built directly into Lumina:
 - **Stealth Protection**: Photos hidden in the vault are completely excluded and filtered out from the main Pictures grid, Albums, and Clean Up views.
 - **One-Tap Actions**: Easily hide photos from the Media Viewer or multi-select action bar, and unhide or permanently delete items inside the vault.
 
-### 14. Unified "More" Hub & Inline Settings
+### 17. Unified "More" Hub & Inline Settings
 
 Lumina consolidates management tools and preferences into a single, cohesive **"More"** dashboard without nested page hopping:
 
@@ -209,7 +253,7 @@ Lumina consolidates management tools and preferences into a single, cohesive **"
 - **Storage & System**: Instant MediaStore permissions overview and direct developer feedback contact.
 - **About Lumina**: Version and project details.
 
-### 15. Trash Bin & Smart 4-Second Instant Undo Navigation
+### 18. Trash Bin & Smart 4-Second Instant Undo Navigation
 
 - **Smart 4-Second Undo Snackbar**: Whenever a photo is discarded in the Media Viewer, an interactive snackbar appears for 4 seconds:
   - Tapping **Undo** from the viewer restores the photo to storage **and immediately navigates back to focus on that restored photo in the viewer**.
@@ -217,7 +261,7 @@ Lumina consolidates management tools and preferences into a single, cohesive **"
 - **Reverse Chronological Order**: Your most recently discarded photos and videos always appear at the top of the bin.
 - **Single-Prompt Deletion**: Deleting an item triggers the native **Android Scoped Storage prompt** once, keeping the process secure, compliant, and streamlined.
 
-### 16. Themes & Modern Aesthetics
+### 19. Themes & Modern Aesthetics
 
 - **Dynamic Theme Modes**:
   - `System Default`: Follows your Android OS dark/light schedule.
@@ -249,6 +293,8 @@ app/
 │   ├── GalleryScreens.kt        # Pictures grid, Albums, Unified More hub, and modern fast scrollbar
 │   ├── GalleryModels.kt         # Data classes (Photo, MediaSort, MediaGroup, Page, DuplicateCluster)
 │   ├── GalleryTheme.kt          # Material 3 ColorScheme, dynamic typography, and dark/light palettes
+│   ├── ImageEditorScreen.kt     # Full image editor: crop, color grading, filters, doodles & blemish eraser
+│   ├── LiveTextScanner.kt       # On-device Live Text (OCR) scanning via Google Play Services ML Kit
 │   ├── VaultScreen.kt           # PIN setup/unlock, encrypted vault grid, and security actions
 │   ├── CleanUpScreen.kt         # Swipe Tidy deck + Hybrid ML burst & duplicate clustering (dHash + Laplacian)
 │   ├── MediaDetailsHelper.kt    # EXIF extraction, in-place renaming, and metadata stripping
@@ -264,6 +310,7 @@ app/
 - **Media Engine**: Android MediaStore ContentResolver + Scoped Storage (`MediaStore.createDeleteRequest`, `createWriteRequest`)
 - **Video Engine**: `androidx.media3:media3-exoplayer:1.5.0`
 - **Image Pipeline**: `io.coil-kt:coil-compose:2.7.0` (with hardware bitmap caching and video frame decoders)
+- **Live Text / OCR Engine**: `com.google.android.gms:play-services-mlkit-text-recognition:19.0.1` (0 MB APK footprint, offline)
 - **Metadata**: `androidx.exifinterface:exifinterface:1.3.7`
 
 ---

@@ -108,6 +108,7 @@ private fun queryMedia(context: Context, isVideo: Boolean): List<Photo> {
         add(MediaStore.MediaColumns.SIZE)
         if (isVideo) add(MediaStore.Video.Media.DURATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(MediaStore.MediaColumns.RELATIVE_PATH)
+        add(MediaStore.MediaColumns.DATE_TAKEN)
     }.toTypedArray()
     val result = mutableListOf<Photo>()
     try {
@@ -116,22 +117,27 @@ private fun queryMedia(context: Context, isVideo: Boolean): List<Photo> {
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
             val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
             val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+            val dateTakenCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN)
             val sizeCol = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
             val durationCol = if (isVideo) cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION) else -1
             val pathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH) else -1
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
                 val sizeBytes = if (sizeCol >= 0 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol) else 0L
+                val dateAddedSec = cursor.getLong(dateCol)
+                val dateTaken = if (dateTakenCol >= 0 && !cursor.isNull(dateTakenCol)) cursor.getLong(dateTakenCol) else 0L
+                val effectiveDateTakenMs = if (dateTaken > 0) dateTaken else dateAddedSec * 1000L
                 result += Photo(
                     id = id,
                     uri = ContentUris.withAppendedId(collection, id),
                     name = cursor.getString(nameCol) ?: if (isVideo) "Video" else "Photo",
                     album = cursor.getString(albumCol) ?: "Other",
-                    date = cursor.getLong(dateCol),
+                    date = dateAddedSec,
                     isVideo = isVideo,
                     durationMs = if (durationCol >= 0) cursor.getLong(durationCol) else 0,
                     relativePath = if (pathCol >= 0) cursor.getString(pathCol) else null,
-                    sizeBytes = sizeBytes
+                    sizeBytes = sizeBytes,
+                    dateTakenMs = effectiveDateTakenMs
                 )
             }
         }
@@ -692,7 +698,8 @@ fun GalleryApp() {
                                                         },
                                                         onRenamed = { _, _ -> scope.launch { loadPhotos() } },
                                                         onMetadataStripped = { _ -> scope.launch { loadPhotos() } },
-                                                        onShare = { share(listOf(it)) }
+                                                        onShare = { share(listOf(it)) },
+                                                        onPhotoSaved = { scope.launch { loadPhotos() } }
                                                     )
                                                 }
                                             }

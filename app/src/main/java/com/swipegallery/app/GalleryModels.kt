@@ -20,6 +20,8 @@ data class Photo(
     /** MediaStore RELATIVE_PATH (e.g. "DCIM/Camera/"); null before Android 10. */
     val relativePath: String? = null,
     val sizeBytes: Long = 0,
+    /** Camera shutter timestamp in milliseconds (from EXIF/MediaStore DATE_TAKEN). */
+    val dateTakenMs: Long = 0L,
 )
 
 enum class Page { Photos, Albums, CleanUp, More }

@@ -74,6 +74,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FilterList
@@ -2153,6 +2154,7 @@ internal fun BottomActionCapsule(
     onShare: () -> Unit,
     onDetails: () -> Unit,
     onHide: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2166,38 +2168,45 @@ internal fun BottomActionCapsule(
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Share
-            IconButton(onClick = onShare, modifier = Modifier.size(42.dp)) {
-                Icon(Icons.Rounded.Share, "Share", tint = Color.White, modifier = Modifier.size(20.dp))
+            IconButton(onClick = onShare, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.Share, "Share", tint = Color.White, modifier = Modifier.size(19.dp))
+            }
+
+            // Edit (only for non-video images)
+            if (onEdit != null && !photo.isVideo) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Rounded.Edit, "Edit", tint = Color.White, modifier = Modifier.size(19.dp))
+                }
             }
 
             // Favorite
-            IconButton(onClick = onToggleFavorite, modifier = Modifier.size(42.dp)) {
+            IconButton(onClick = onToggleFavorite, modifier = Modifier.size(40.dp)) {
                 Icon(
                     if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     "Favorite",
                     tint = if (isFavorite) Color(0xFFE53935) else Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
 
             // Hide to Vault
             if (onHide != null) {
-                IconButton(onClick = onHide, modifier = Modifier.size(42.dp)) {
-                    Icon(Icons.Rounded.Lock, "Hide to Vault", tint = Color.White, modifier = Modifier.size(20.dp))
+                IconButton(onClick = onHide, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Rounded.Lock, "Hide to Vault", tint = Color.White, modifier = Modifier.size(19.dp))
                 }
             }
 
             // Details / "i"
-            IconButton(onClick = onDetails, modifier = Modifier.size(42.dp)) {
-                Icon(Icons.Rounded.Info, "Details", tint = Color.White, modifier = Modifier.size(20.dp))
+            IconButton(onClick = onDetails, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.Info, "Details", tint = Color.White, modifier = Modifier.size(19.dp))
             }
 
             // Delete / Trash
-            IconButton(onClick = onDelete, modifier = Modifier.size(42.dp)) {
-                Icon(Icons.Rounded.DeleteOutline, "Move to trash", tint = Color.White, modifier = Modifier.size(20.dp))
+            IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Rounded.DeleteOutline, "Move to trash", tint = Color.White, modifier = Modifier.size(19.dp))
             }
         }
     }
@@ -2210,7 +2219,7 @@ internal fun BottomActionCapsule(
  * - Tap image/video to toggle controls visibility
  * - Controls with stylish translucent gradient backgrounds
  * - Comfy bottom thumbnail filmstrip for quick scrubbing
- * - Floating modern action capsule (Share, Favorite, Hide, Info, Delete)
+ * - Floating modern action capsule (Share, Edit, Favorite, Hide, Info, Delete)
  * - "i" info icon button to view all details, rename, or delete metadata
  */
 @Composable
@@ -2225,17 +2234,23 @@ internal fun PhotoDetail(
     onHide: ((Photo) -> Unit)? = null,
     onRenamed: (Photo, String) -> Unit,
     onMetadataStripped: (Photo) -> Unit,
-    onShare: (Photo) -> Unit = {}
+    onShare: (Photo) -> Unit = {},
+    onPhotoSaved: (Uri) -> Unit = {}
 ) {
     val pagerState = rememberPagerState(initialPage = photos.indexOfFirst { it.id == initialPhoto.id }.coerceAtLeast(0)) { photos.size }
     val scope = rememberCoroutineScope()
     val colors = LocalAppColors.current
+    val context = LocalContext.current
 
     var liftY by remember { mutableFloatStateOf(0f) }
     var removing by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var isCurrentZoomed by remember { mutableStateOf(false) }
     var showDetailsSheet by remember { mutableStateOf(false) }
+    var showEditor by remember { mutableStateOf(false) }
+    var isOcrScanning by remember { mutableStateOf(false) }
+    var ocrResult by remember { mutableStateOf<VisionTextResult?>(null) }
+    var showOcrDialog by remember { mutableStateOf(false) }
     var dragAllowed by remember { mutableStateOf(false) }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
@@ -2486,6 +2501,7 @@ internal fun PhotoDetail(
                     onShare = { onShare(photo) },
                     onDetails = { showDetailsSheet = true },
                     onHide = { onHide?.invoke(photo) },
+                    onEdit = { showEditor = true },
                     onDelete = { if (!pagerState.isScrollInProgress) trashCurrent() }
                 )
 
@@ -2500,6 +2516,55 @@ internal fun PhotoDetail(
                 )
             }
         }
+
+        // Floating Samsung-style "T" Live Text Scan Button
+        if (!photo.isVideo && controlsVisible) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(bottom = 126.dp, end = 18.dp),
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                LiveTextScanButton(
+                    isScanning = isOcrScanning,
+                    onClick = {
+                        if (!isOcrScanning) {
+                            isOcrScanning = true
+                            scope.launch {
+                                val result = extractTextFromPhoto(context, photo.uri)
+                                isOcrScanning = false
+                                if (result.fullText.isNotBlank()) {
+                                    ocrResult = result
+                                    showOcrDialog = true
+                                } else {
+                                    android.widget.Toast.makeText(context, "No text detected in this photo", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    if (showOcrDialog && ocrResult != null) {
+        LiveTextResultDialog(
+            result = ocrResult!!,
+            onDismiss = { showOcrDialog = false }
+        )
+    }
+
+    if (showEditor) {
+        val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: initialPhoto
+        ImageEditorScreen(
+            photo = currentPhoto,
+            onDismiss = { showEditor = false },
+            onSaved = { savedUri ->
+                showEditor = false
+                onPhotoSaved(savedUri)
+            }
+        )
     }
 
     if (showDetailsSheet) {
@@ -2993,7 +3058,7 @@ internal fun MorePage(
                 onClick = {
                     val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
                         data = Uri.parse("mailto:support@swipegallery.app")
-                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v2.0.0")
+                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v2.1.0")
                     }
                     try { context.startActivity(emailIntent) } catch (_: Exception) {}
                 }
@@ -3027,7 +3092,7 @@ internal fun MorePage(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Version 2.0.0 · Fast, Comfy & Private",
+                        "Version 2.1.0 · Fast, Comfy & Private",
                         fontSize = 12.sp,
                         color = colors.muted
                     )

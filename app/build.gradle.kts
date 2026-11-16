@@ -21,8 +21,8 @@ android {
         applicationId = "com.swipegallery.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = 4
+        versionName = "2.1.0"
     }
     signingConfigs {
         if (localReleaseSigningFile.isFile) {
@@ -71,5 +71,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
