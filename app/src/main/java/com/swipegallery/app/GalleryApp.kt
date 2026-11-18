@@ -29,6 +29,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -148,7 +151,7 @@ private fun queryMedia(context: Context, isVideo: Boolean): List<Photo> {
 }
 
 @Composable
-fun GalleryApp() {
+fun GalleryApp(initialExternalUri: Uri? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("gallery_state", Context.MODE_PRIVATE) }
@@ -268,6 +271,7 @@ fun GalleryApp() {
     var hasAccess by remember { mutableStateOf(false) }
     var accessBlocked by remember { mutableStateOf(false) }
     var pendingDeleteIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var stagedTrashDeleteIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     // Favorites state with persistent storage
     var favoriteIds by remember {
@@ -434,10 +438,34 @@ fun GalleryApp() {
         if (!hasAccess && hasMediaAccess(context)) onAccessGranted()
     }
 
+    // Handle external media opened or shared to this app
+    var handledExternalUri by remember { mutableStateOf<Uri?>(null) }
+    LaunchedEffect(initialExternalUri, photos) {
+        if (initialExternalUri != null && initialExternalUri != handledExternalUri) {
+            val matching = photos.firstOrNull { it.uri == initialExternalUri }
+            if (matching != null) {
+                handledExternalUri = initialExternalUri
+                selectedPhoto = matching
+            } else if (photos.isNotEmpty() || !loading) {
+                // If not in standard query list, create a direct Photo representation
+                handledExternalUri = initialExternalUri
+                selectedPhoto = Photo(
+                    id = -1L,
+                    uri = initialExternalUri,
+                    name = "Shared Media",
+                    album = "External",
+                    date = System.currentTimeMillis() / 1000L,
+                    isVideo = initialExternalUri.toString().contains("video", ignoreCase = true)
+                )
+            }
+        }
+    }
+
     val visiblePhotos = photos.filter { it.id.toString() !in trashIds && it.id.toString() !in vaultPhotoIds }
     val vaultPhotos = photos.filter { it.id.toString() in vaultPhotoIds }
     // In trash bin, sort by reverse order: newest trashed item is on top!
-    val trashed = photos.filter { it.id.toString() in trashIds }.sortedBy {
+    // Filter out items that are currently staged for permanent deletion with an undo snackbar active
+    val trashed = photos.filter { it.id.toString() in trashIds && it.id.toString() !in stagedTrashDeleteIds }.sortedBy {
         val idx = trashOrder.indexOf(it.id.toString())
         if (idx >= 0) idx else Int.MAX_VALUE
     }
@@ -512,43 +540,103 @@ fun GalleryApp() {
                     )
                 }
                 viewingTrash -> {
-                    Column(Modifier.fillMaxSize().background(colors.canvas)) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 22.dp, vertical = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = { viewingTrash = false }) {
-                                Icon(
-                                    Icons.AutoMirrored.Rounded.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = colors.ink
-                                )
+                    Box(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize().background(colors.canvas)) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 22.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(onClick = { viewingTrash = false }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = colors.ink
+                                    )
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "Trash",
+                                        fontSize = 26.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.ink
+                                    )
+                                    Text(
+                                        "${trashed.size} items · recoverable bin",
+                                        fontSize = 10.sp,
+                                        letterSpacing = 1.2.sp,
+                                        color = colors.muted,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "Trash",
-                                    fontSize = 26.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.ink
-                                )
-                                Text(
-                                    "${trashed.size} items · recoverable bin",
-                                    fontSize = 10.sp,
-                                    letterSpacing = 1.2.sp,
-                                    color = colors.muted,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                            TrashPage(
+                                photos = trashed,
+                                onRestore = { photo -> removeFromTrash(listOf(photo.id.toString())) },
+                                onDelete = { photo ->
+                                    val idStr = photo.id.toString()
+                                    stagedTrashDeleteIds = stagedTrashDeleteIds + idStr
+                                    scope.launch {
+                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = "Deleted 1 item from bin",
+                                            actionLabel = "Undo",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            // Undo: Re-appear photo in trash bin without opening
+                                            stagedTrashDeleteIds = stagedTrashDeleteIds - idStr
+                                        } else {
+                                            // Snackbar timed out or was dismissed: finalize permanent deletion
+                                            stagedTrashDeleteIds = stagedTrashDeleteIds - idStr
+                                            permanentlyDelete(listOf(photo))
+                                        }
+                                    }
+                                },
+                                onEmpty = { ids ->
+                                    stagedTrashDeleteIds = stagedTrashDeleteIds + ids
+                                    val count = ids.size
+                                    val photosToDelete = trashed.filter { it.id.toString() in ids }
+                                    scope.launch {
+                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = "Emptied $count ${if (count == 1) "item" else "items"} from bin",
+                                            actionLabel = "Undo",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            // Undo: Re-appear all photos back in trash bin
+                                            stagedTrashDeleteIds = stagedTrashDeleteIds - ids
+                                        } else {
+                                            // Finalize permanent deletion
+                                            stagedTrashDeleteIds = stagedTrashDeleteIds - ids
+                                            permanentlyDelete(photosToDelete)
+                                        }
+                                    }
+                                }
+                            )
                         }
-                        TrashPage(
-                            photos = trashed,
-                            onRestore = { photo -> removeFromTrash(listOf(photo.id.toString())) },
-                            onDelete = { photo -> permanentlyDelete(listOf(photo)) },
-                            onEmpty = { ids -> permanentlyDelete(trashed.filter { it.id.toString() in ids }) }
-                        )
+
+                        SnackbarHost(
+                            hostState = snackbarHostState,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .navigationBarsPadding()
+                                .padding(bottom = 16.dp)
+                        ) { data ->
+                            Snackbar(
+                                snackbarData = data,
+                                containerColor = colors.card,
+                                contentColor = colors.ink,
+                                actionColor = colors.green,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp)
+                                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                            )
+                        }
                     }
                 }
                 else -> {
@@ -630,11 +718,11 @@ fun GalleryApp() {
                                                 contentKey = { it != null },
                                                 transitionSpec = {
                                                     if (targetState == null) {
-                                                        (fadeIn(tween(220)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { -it / 8 }) togetherWith
-                                                            (fadeOut(tween(180)) + slideOutVertically(tween(240)) { it / 5 })
+                                                        (fadeIn(tween(240, easing = FastOutSlowInEasing)) + slideInVertically(tween(300, easing = FastOutSlowInEasing)) { -it / 10 }) togetherWith
+                                                            (fadeOut(tween(200, easing = FastOutSlowInEasing)) + slideOutVertically(tween(280, easing = FastOutSlowInEasing)) { it / 6 })
                                                     } else {
-                                                        (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 5 }) togetherWith
-                                                            (fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it / 6 })
+                                                        (fadeIn(tween(260, easing = FastOutSlowInEasing)) + slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 6 }) togetherWith
+                                                            (fadeOut(tween(200, easing = FastOutSlowInEasing)) + slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { -it / 8 })
                                                     }
                                                 },
                                                 label = "photo viewer navigation"
@@ -728,6 +816,8 @@ fun GalleryApp() {
                                                         )
                                                         if (result == SnackbarResult.ActionPerformed) {
                                                             removeFromTrash(listOf(photoIdStr))
+                                                            page = Page.Photos
+                                                            selectedPhoto = photo
                                                         }
                                                     }
                                                 },
@@ -774,6 +864,10 @@ fun GalleryApp() {
                                             )
                                             if (result == SnackbarResult.ActionPerformed) {
                                                 removeFromTrash(toTrash)
+                                                // If single item was deleted, restore and navigate to it with animation
+                                                if (selectedItems.size == 1) {
+                                                    selectedPhoto = selectedItems.first()
+                                                }
                                             }
                                         }
                                     }
@@ -802,10 +896,13 @@ fun GalleryApp() {
                         ) { data ->
                             Snackbar(
                                 snackbarData = data,
-                                containerColor = colors.ink,
-                                contentColor = colors.canvas,
+                                containerColor = colors.card,
+                                contentColor = colors.ink,
                                 actionColor = colors.green,
-                                shape = RoundedCornerShape(14.dp)
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp)
+                                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
                             )
                         }
                     }

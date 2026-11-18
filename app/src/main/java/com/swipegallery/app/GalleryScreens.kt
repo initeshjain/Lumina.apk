@@ -1827,7 +1827,16 @@ internal fun TrashPage(
         ) {
             items(photos, key = { it.id }) { photo ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateItem(
+                            fadeInSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                            fadeOutSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+                            placementSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = colors.card),
                     border = BorderStroke(1.dp, colors.border),
@@ -2266,7 +2275,7 @@ internal fun PhotoDetail(
             val target = photo
             removing = true
             scope.launch {
-                Animatable(liftY).animateTo(-heightPx, tween(220, easing = FastOutSlowInEasing)) { liftY = value }
+                Animatable(liftY).animateTo(-heightPx, tween(280, easing = FastOutSlowInEasing)) { liftY = value }
                 onTrash(target)
                 liftY = 0f
                 removing = false
@@ -3058,7 +3067,7 @@ internal fun MorePage(
                 onClick = {
                     val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
                         data = Uri.parse("mailto:support@swipegallery.app")
-                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v2.1.0")
+                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v2.2.0")
                     }
                     try { context.startActivity(emailIntent) } catch (_: Exception) {}
                 }
@@ -3092,7 +3101,7 @@ internal fun MorePage(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Version 2.1.0 · Fast, Comfy & Private",
+                        "Version 2.2.0 · Fast, Comfy & Private",
                         fontSize = 12.sp,
                         color = colors.muted
                     )
