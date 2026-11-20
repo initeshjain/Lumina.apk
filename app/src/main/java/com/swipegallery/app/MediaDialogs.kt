@@ -64,6 +64,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import android.graphics.BitmapFactory
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,161 +92,212 @@ internal fun SortAndGroupDialog(
     onDismiss: () -> Unit
 ) {
     val colors = LocalAppColors.current
+    val context = LocalContext.current
     var selectedSortField by remember { mutableStateOf(sort.field) }
     var selectedSortOrder by remember { mutableStateOf(sort.order) }
     var selectedGroupBy by remember { mutableStateOf(group.groupBy) }
     var selectedGroupOrder by remember { mutableStateOf(group.order) }
 
-    AlertDialog(
+    val paperNoiseBrush = remember(context) {
+        try {
+            val bmp = BitmapFactory.decodeResource(context.resources, R.drawable.bg_paper_grain)
+            if (bmp != null) {
+                val imageBitmap = bmp.asImageBitmap()
+                ShaderBrush(ImageShader(imageBitmap, TileMode.Repeated, TileMode.Repeated))
+            } else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text("Sort & Group Media", fontWeight = FontWeight.Bold, color = colors.ink, fontSize = 20.sp)
-        },
-        text = {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // SORT SECTION
-                Column {
-                    Text("SORT BY", fontSize = 11.sp, letterSpacing = 1.2.sp, color = colors.muted, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SortField.entries.forEach { field ->
-                            FilterChip(
-                                selected = selectedSortField == field,
-                                onClick = { selectedSortField = field },
-                                label = { Text(field.label) },
-                                leadingIcon = {
-                                    Icon(
-                                        if (field == SortField.Date) Icons.Rounded.CalendarMonth else Icons.Rounded.SortByAlpha,
-                                        null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.green.copy(alpha = 0.15f),
-                                    selectedLabelColor = colors.green
-                                )
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            modifier = Modifier.weight(1f),
-                            selected = selectedSortOrder == SortOrder.Descending,
-                            onClick = { selectedSortOrder = SortOrder.Descending },
-                            label = { Text(if (selectedSortField == SortField.Date) "Newest first" else "Z to A", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            leadingIcon = { Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(16.dp)) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.green.copy(alpha = 0.15f),
-                                selectedLabelColor = colors.green
-                            )
-                        )
-                        FilterChip(
-                            modifier = Modifier.weight(1f),
-                            selected = selectedSortOrder == SortOrder.Ascending,
-                            onClick = { selectedSortOrder = SortOrder.Ascending },
-                            label = { Text(if (selectedSortField == SortField.Date) "Oldest first" else "A to Z", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            leadingIcon = { Icon(Icons.Rounded.ArrowUpward, null, modifier = Modifier.size(16.dp)) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.green.copy(alpha = 0.15f),
-                                selectedLabelColor = colors.green
-                            )
-                        )
-                    }
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = colors.card,
+            border = BorderStroke(1.dp, colors.border.copy(alpha = 0.6f)),
+            shadowElevation = 12.dp
+        ) {
+            Box(Modifier.fillMaxWidth()) {
+                if (paperNoiseBrush != null) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(paperNoiseBrush, alpha = if (colors.isDark) 0.05f else 0.07f)
+                    )
                 }
 
-                HorizontalDivider(color = colors.border)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(22.dp)
+                ) {
+                    Text(
+                        "Sort & Group Media",
+                        fontWeight = FontWeight.Bold,
+                        color = colors.ink,
+                        fontSize = 20.sp
+                    )
 
-                // GROUP SECTION
-                Column {
-                    Text("GROUP BY", fontSize = 11.sp, letterSpacing = 1.2.sp, color = colors.muted, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Row(
+                    Spacer(Modifier.height(16.dp))
+
+                    Column(
                         Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .heightIn(max = 440.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        GroupBy.entries.forEach { g ->
-                            FilterChip(
-                                selected = selectedGroupBy == g,
-                                onClick = { selectedGroupBy = g },
-                                label = { Text(g.label, maxLines = 1) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.green.copy(alpha = 0.15f),
-                                    selectedLabelColor = colors.green
+                        // SORT SECTION
+                        Column {
+                            Text("SORT BY", fontSize = 11.sp, letterSpacing = 1.2.sp, color = colors.muted, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SortField.entries.forEach { field ->
+                                    FilterChip(
+                                        selected = selectedSortField == field,
+                                        onClick = { selectedSortField = field },
+                                        label = { Text(field.label) },
+                                        leadingIcon = {
+                                            Icon(
+                                                if (field == SortField.Date) Icons.Rounded.CalendarMonth else Icons.Rounded.SortByAlpha,
+                                                null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = colors.green.copy(alpha = 0.15f),
+                                            selectedLabelColor = colors.green
+                                        )
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    modifier = Modifier.weight(1f),
+                                    selected = selectedSortOrder == SortOrder.Descending,
+                                    onClick = { selectedSortOrder = SortOrder.Descending },
+                                    label = { Text(if (selectedSortField == SortField.Date) "Newest first" else "Z to A", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    leadingIcon = { Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(16.dp)) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = colors.green.copy(alpha = 0.15f),
+                                        selectedLabelColor = colors.green
+                                    )
                                 )
-                            )
+                                FilterChip(
+                                    modifier = Modifier.weight(1f),
+                                    selected = selectedSortOrder == SortOrder.Ascending,
+                                    onClick = { selectedSortOrder = SortOrder.Ascending },
+                                    label = { Text(if (selectedSortField == SortField.Date) "Oldest first" else "A to Z", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    leadingIcon = { Icon(Icons.Rounded.ArrowUpward, null, modifier = Modifier.size(16.dp)) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = colors.green.copy(alpha = 0.15f),
+                                        selectedLabelColor = colors.green
+                                    )
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = colors.border)
+
+                        // GROUP SECTION
+                        Column {
+                            Text("GROUP BY", fontSize = 11.sp, letterSpacing = 1.2.sp, color = colors.muted, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GroupBy.entries.forEach { g ->
+                                    FilterChip(
+                                        selected = selectedGroupBy == g,
+                                        onClick = { selectedGroupBy = g },
+                                        label = { Text(g.label, maxLines = 1) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = colors.green.copy(alpha = 0.15f),
+                                            selectedLabelColor = colors.green
+                                        )
+                                    )
+                                }
+                            }
+                            if (selectedGroupBy != GroupBy.None) {
+                                Spacer(Modifier.height(6.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        modifier = Modifier.weight(1f),
+                                        selected = selectedGroupOrder == SortOrder.Descending,
+                                        onClick = { selectedGroupOrder = SortOrder.Descending },
+                                        label = {
+                                            Text(
+                                                if (selectedGroupBy == GroupBy.Name) "Z to A" else "Newest first",
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        leadingIcon = { Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(16.dp)) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = colors.green.copy(alpha = 0.15f),
+                                            selectedLabelColor = colors.green
+                                        )
+                                    )
+                                    FilterChip(
+                                        modifier = Modifier.weight(1f),
+                                        selected = selectedGroupOrder == SortOrder.Ascending,
+                                        onClick = { selectedGroupOrder = SortOrder.Ascending },
+                                        label = {
+                                            Text(
+                                                if (selectedGroupBy == GroupBy.Name) "A to Z" else "Oldest first",
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        leadingIcon = { Icon(Icons.Rounded.ArrowUpward, null, modifier = Modifier.size(16.dp)) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = colors.green.copy(alpha = 0.15f),
+                                            selectedLabelColor = colors.green
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
-                    if (selectedGroupBy != GroupBy.None) {
-                        Spacer(Modifier.height(6.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                modifier = Modifier.weight(1f),
-                                selected = selectedGroupOrder == SortOrder.Descending,
-                                onClick = { selectedGroupOrder = SortOrder.Descending },
-                                label = {
-                                    Text(
-                                        if (selectedGroupBy == GroupBy.Name) "Z to A" else "Newest first",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(16.dp)) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.green.copy(alpha = 0.15f),
-                                    selectedLabelColor = colors.green
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text("Cancel", color = colors.muted)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                onApply(
+                                    MediaSort(selectedSortField, selectedSortOrder),
+                                    MediaGroup(selectedGroupBy, selectedGroupOrder)
                                 )
-                            )
-                            FilterChip(
-                                modifier = Modifier.weight(1f),
-                                selected = selectedGroupOrder == SortOrder.Ascending,
-                                onClick = { selectedGroupOrder = SortOrder.Ascending },
-                                label = {
-                                    Text(
-                                        if (selectedGroupBy == GroupBy.Name) "A to Z" else "Oldest first",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.ArrowUpward, null, modifier = Modifier.size(16.dp)) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = colors.green.copy(alpha = 0.15f),
-                                    selectedLabelColor = colors.green
-                                )
-                            )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.green),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Apply")
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onApply(
-                        MediaSort(selectedSortField, selectedSortOrder),
-                        MediaGroup(selectedGroupBy, selectedGroupOrder)
-                    )
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = colors.green),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Apply")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = colors.muted)
-            }
-        },
-        containerColor = colors.card
-    )
+        }
+    }
 }
 
 /**

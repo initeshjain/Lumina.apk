@@ -24,7 +24,7 @@ data class Photo(
     val dateTakenMs: Long = 0L,
 )
 
-enum class Page { Photos, Albums, CleanUp, More }
+enum class Page { Photos, Albums, Search, CleanUp, More }
 
 enum class MediaFilter(val label: String) { All("All"), Photos("Photos"), Videos("Videos"), Favorites("Favorites") }
 

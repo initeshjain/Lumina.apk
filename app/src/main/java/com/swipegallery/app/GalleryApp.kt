@@ -29,6 +29,14 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.TileMode
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
@@ -75,6 +83,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import kotlin.math.abs
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -148,6 +169,79 @@ private fun queryMedia(context: Context, isVideo: Boolean): List<Photo> {
         // Access to this media type was not granted; show what we can.
     }
     return result
+}
+
+private fun resolvePhotoFromUri(context: Context, uri: Uri, existingPhotos: List<Photo>): Photo {
+    // 1. Direct match on URI string or URI object
+    val directMatch = existingPhotos.firstOrNull { it.uri == uri || it.uri.toString() == uri.toString() }
+    if (directMatch != null) return directMatch
+
+    // 2. If it's a numeric MediaStore ID URI (e.g. content://media/external/images/media/123)
+    val lastSegmentId = uri.lastPathSegment?.toLongOrNull()
+    if (lastSegmentId != null && lastSegmentId > 0) {
+        val idMatch = existingPhotos.firstOrNull { it.id == lastSegmentId }
+        if (idMatch != null) return idMatch
+    }
+
+    // 3. Query ContentResolver for display name, size, mimeType
+    var displayName = "Media"
+    var sizeBytes = 0L
+    var dateModifiedSec = System.currentTimeMillis() / 1000L
+    var isVideo = uri.toString().contains("video", ignoreCase = true)
+
+    try {
+        val mime = context.contentResolver.getType(uri)
+        if (mime != null && mime.startsWith("video/")) {
+            isVideo = true
+        }
+        val proj = arrayOf(
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.MediaColumns.MIME_TYPE
+        )
+        context.contentResolver.query(uri, proj, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                val sizeIdx = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                val dateIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                val mimeIdx = cursor.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
+
+                if (nameIdx >= 0 && !cursor.isNull(nameIdx)) displayName = cursor.getString(nameIdx)
+                if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) sizeBytes = cursor.getLong(sizeIdx)
+                if (dateIdx >= 0 && !cursor.isNull(dateIdx)) {
+                    val d = cursor.getLong(dateIdx)
+                    if (d > 0) dateModifiedSec = d
+                }
+                if (mimeIdx >= 0 && !cursor.isNull(mimeIdx)) {
+                    val m = cursor.getString(mimeIdx)
+                    if (m != null && m.startsWith("video/")) isVideo = true
+                }
+            }
+        }
+    } catch (_: Exception) {}
+
+    // 4. Try matching with existing photos by display name & size if available
+    if (displayName != "Media" && sizeBytes > 0) {
+        val nameSizeMatch = existingPhotos.firstOrNull { it.name == displayName && it.sizeBytes == sizeBytes }
+        if (nameSizeMatch != null) return nameSizeMatch
+    }
+    if (displayName != "Media") {
+        val nameMatch = existingPhotos.firstOrNull { it.name == displayName }
+        if (nameMatch != null) return nameMatch
+    }
+
+    // 5. Fallback: Return external Photo with a unique negative id so it won't collide
+    return Photo(
+        id = -uri.hashCode().toLong().let { if (it >= 0) -1L else it },
+        uri = uri,
+        name = displayName,
+        album = "External",
+        date = dateModifiedSec,
+        isVideo = isVideo,
+        sizeBytes = sizeBytes,
+        dateTakenMs = dateModifiedSec * 1000L
+    )
 }
 
 @Composable
@@ -264,6 +358,7 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
         prefs.edit().putInt("grid_columns", clamped).apply()
     }
     var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var selectedTrashIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var moveDialogOpen by remember { mutableStateOf(false) }
     var pendingMove by remember { mutableStateOf<Pair<List<Photo>, String>?>(null) }
     var previewPhoto by remember { mutableStateOf<Photo?>(null) }
@@ -442,22 +537,10 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
     var handledExternalUri by remember { mutableStateOf<Uri?>(null) }
     LaunchedEffect(initialExternalUri, photos) {
         if (initialExternalUri != null && initialExternalUri != handledExternalUri) {
-            val matching = photos.firstOrNull { it.uri == initialExternalUri }
-            if (matching != null) {
-                handledExternalUri = initialExternalUri
-                selectedPhoto = matching
-            } else if (photos.isNotEmpty() || !loading) {
-                // If not in standard query list, create a direct Photo representation
-                handledExternalUri = initialExternalUri
-                selectedPhoto = Photo(
-                    id = -1L,
-                    uri = initialExternalUri,
-                    name = "Shared Media",
-                    album = "External",
-                    date = System.currentTimeMillis() / 1000L,
-                    isVideo = initialExternalUri.toString().contains("video", ignoreCase = true)
-                )
-            }
+            handledExternalUri = initialExternalUri
+            val resolved = resolvePhotoFromUri(context, initialExternalUri, photos)
+            page = Page.Photos
+            selectedPhoto = resolved
         }
     }
 
@@ -488,8 +571,11 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
 
     val selectedItems = gridItems.filter { it.id in selectedIds }
     val selecting = selectedIds.isNotEmpty() && page == Page.Photos && selectedPhoto == null
+    val selectingTrash = selectedTrashIds.isNotEmpty() && viewingTrash
+    val selectedTrashItems = trashed.filter { it.id in selectedTrashIds }
     fun clearSelection() { selectedIds = emptySet() }
-    val canNavigateBack = viewingVault || viewingTrash || isSearching || searchQuery.isNotEmpty() || videoDetailsPhoto != null || playingVideo != null || previewPhoto != null || selecting || showSettings || selectedPhoto != null || selectedAlbum != null || page != Page.Photos
+    fun clearTrashSelection() { selectedTrashIds = emptySet() }
+    val canNavigateBack = viewingVault || viewingTrash || isSearching || searchQuery.isNotEmpty() || videoDetailsPhoto != null || playingVideo != null || previewPhoto != null || selecting || selectingTrash || showSettings || selectedPhoto != null || selectedAlbum != null || page != Page.Photos
 
     BackHandler(enabled = canNavigateBack) {
         when {
@@ -497,15 +583,20 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
             playingVideo != null -> playingVideo = null
             previewPhoto != null -> previewPhoto = null
             selecting -> clearSelection()
+            selectingTrash -> clearTrashSelection()
             showSettings -> showSettings = false
             viewingVault -> viewingVault = false
-            viewingTrash -> viewingTrash = false
+            viewingTrash -> { viewingTrash = false; clearTrashSelection() }
             selectedPhoto != null -> selectedPhoto = null
             isSearching || searchQuery.isNotEmpty() -> {
                 isSearching = false
                 searchQuery = ""
             }
             selectedAlbum != null -> { selectedAlbum = null; page = Page.Albums }
+            page == Page.Search -> {
+                searchQuery = ""
+                page = Page.Photos
+            }
             page != Page.Photos -> page = Page.Photos
         }
     }
@@ -513,8 +604,30 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
     GalleryTheme(themeMode = themeMode) {
         val colors = LocalAppColors.current
 
+        val paperNoiseBrush = remember(context) {
+            try {
+                val bmp = BitmapFactory.decodeResource(context.resources, R.drawable.bg_paper_grain)
+                if (bmp != null) {
+                    val imageBitmap = bmp.asImageBitmap()
+                    ShaderBrush(ImageShader(imageBitmap, TileMode.Repeated, TileMode.Repeated))
+                } else null
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
         Surface(Modifier.fillMaxSize(), color = colors.canvas) {
-            when {
+            Box(Modifier.fillMaxSize()) {
+                // Subtle tactile noisy paper background overlay tiled across the entire screen
+                if (paperNoiseBrush != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(paperNoiseBrush, alpha = if (colors.isDark) 0.035f else 0.055f)
+                    )
+                }
+
+                when {
                 showSettings -> {
                     SettingsPage(
                         hasAccess = hasAccess,
@@ -542,38 +655,61 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                 viewingTrash -> {
                     Box(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize().background(colors.canvas)) {
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 22.dp, vertical = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(onClick = { viewingTrash = false }) {
-                                    Icon(
-                                        Icons.AutoMirrored.Rounded.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = colors.ink
-                                    )
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        "Trash",
-                                        fontSize = 26.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.ink
-                                    )
-                                    Text(
-                                        "${trashed.size} items · recoverable bin",
-                                        fontSize = 10.sp,
-                                        letterSpacing = 1.2.sp,
-                                        color = colors.muted,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                            if (selectingTrash) {
+                                SelectionTopBar(
+                                    count = selectedTrashItems.size,
+                                    allSelected = selectedTrashItems.size == trashed.size,
+                                    onClose = { clearTrashSelection() },
+                                    onToggleAll = {
+                                        selectedTrashIds = if (selectedTrashItems.size == trashed.size) emptySet() else trashed.map { it.id }.toSet()
+                                    }
+                                )
+                            } else {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .statusBarsPadding()
+                                        .padding(horizontal = 22.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(onClick = { viewingTrash = false; clearTrashSelection() }) {
+                                        Icon(
+                                            Icons.AutoMirrored.Rounded.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = colors.ink
+                                        )
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "Trash",
+                                            fontSize = 26.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colors.ink
+                                        )
+                                        Text(
+                                            "${trashed.size} items · recoverable bin",
+                                            fontSize = 10.sp,
+                                            letterSpacing = 1.2.sp,
+                                            color = colors.muted,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
                             TrashPage(
                                 photos = trashed,
+                                gridColumns = gridColumns,
+                                onGridColumnsChange = { updateGridColumns(it) },
+                                selectedIds = selectedTrashIds,
+                                onToggleSelect = { photo ->
+                                    selectedTrashIds = if (photo.id in selectedTrashIds) selectedTrashIds - photo.id else selectedTrashIds + photo.id
+                                },
+                                onLongPress = { photo ->
+                                    selectedTrashIds = selectedTrashIds + photo.id
+                                },
+                                onRangeSelect = { ids ->
+                                    selectedTrashIds = selectedTrashIds + ids
+                                },
                                 onRestore = { photo -> removeFromTrash(listOf(photo.id.toString())) },
                                 onDelete = { photo ->
                                     val idStr = photo.id.toString()
@@ -619,6 +755,59 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                             )
                         }
 
+                        if (selectingTrash) {
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .navigationBarsPadding()
+                                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = colors.card,
+                                shadowElevation = 10.dp,
+                                border = BorderStroke(1.dp, colors.border)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            val idsToRestore = selectedTrashItems.map { it.id.toString() }
+                                            removeFromTrash(idsToRestore)
+                                            clearTrashSelection()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = colors.chipBackground,
+                                            contentColor = RestoreBlack
+                                        ),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.Restore, contentDescription = "Restore", tint = RestoreBlack, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Restore (${selectedTrashItems.size})", fontWeight = FontWeight.SemiBold, color = RestoreBlack)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            val toDelete = selectedTrashItems.toList()
+                                            clearTrashSelection()
+                                            permanentlyDelete(toDelete)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = colors.red.copy(alpha = 0.15f),
+                                            contentColor = colors.red
+                                        ),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete permanently", tint = colors.red, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Delete (${selectedTrashItems.size})", fontWeight = FontWeight.SemiBold, color = colors.red)
+                                    }
+                                }
+                            }
+                        }
+
                         SnackbarHost(
                             hostState = snackbarHostState,
                             modifier = Modifier
@@ -626,6 +815,9 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                 .navigationBarsPadding()
                                 .padding(bottom = 16.dp)
                         ) { data ->
+                            var offsetX by remember { mutableStateOf(0f) }
+                            var offsetY by remember { mutableStateOf(0f) }
+
                             Snackbar(
                                 snackbarData = data,
                                 containerColor = colors.card,
@@ -634,6 +826,35 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .padding(horizontal = 16.dp)
+                                    .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                                    .pointerInput(data) {
+                                        detectDragGestures(
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                offsetX += dragAmount.x
+                                                // Only allow dragging downward for dismiss
+                                                if (dragAmount.y > 0 || offsetY > 0) {
+                                                    offsetY += dragAmount.y
+                                                }
+                                                // If swiped far enough left, right, or down, dismiss immediately
+                                                if (abs(offsetX) > 160f || offsetY > 120f) {
+                                                    data.dismiss()
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                if (abs(offsetX) > 80f || offsetY > 60f) {
+                                                    data.dismiss()
+                                                } else {
+                                                    offsetX = 0f
+                                                    offsetY = 0f
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
+                                        )
+                                    }
                                     .border(1.dp, colors.border, RoundedCornerShape(16.dp))
                             )
                         }
@@ -641,7 +862,7 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                 }
                 else -> {
                     Box(Modifier.fillMaxSize()) {
-                        Column(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize().statusBarsPadding()) {
                             if (selecting) {
                                 SelectionTopBar(
                                     count = selectedItems.size,
@@ -651,9 +872,9 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                         selectedIds = if (selectedItems.size == gridItems.size) emptySet() else gridItems.map { it.id }.toSet()
                                     }
                                 )
-                            } else if (selectedPhoto == null && (page == Page.Photos || page == Page.Albums)) {
+                            } else if (selectedPhoto == null && (page == Page.Photos || page == Page.Albums || page == Page.Search)) {
                                 AnimatedVisibility(
-                                    visible = isHeaderVisible || isSearching || searchQuery.isNotEmpty() || page == Page.Albums,
+                                    visible = (isHeaderVisible && page != Page.Search) || isSearching || searchQuery.isNotEmpty() || page == Page.Albums || page == Page.Search,
                                     enter = expandVertically(tween(220, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
                                     exit = shrinkVertically(tween(220, easing = FastOutSlowInEasing)) + fadeOut(tween(160))
                                 ) {
@@ -662,30 +883,12 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                             page = page,
                                             count = gridItems.size,
                                             album = selectedAlbum,
-                                            isSearching = isSearching,
-                                            onToggleSearch = {
-                                                isSearching = !isSearching
-                                                if (!isSearching) searchQuery = ""
-                                            }
+                                            isSearching = false,
+                                            onToggleSearch = null
                                         ) {
                                             clearSelection()
-                                            if (isSearching) {
-                                                isSearching = false
-                                                searchQuery = ""
-                                            }
                                             if (selectedAlbum != null) { selectedAlbum = null; page = Page.Albums }
                                             else page = Page.Photos
-                                        }
-
-                                        AnimatedVisibility(
-                                            visible = isSearching && (page == Page.Photos || selectedAlbum != null),
-                                            enter = fadeIn(tween(180)) + expandVertically(),
-                                            exit = fadeOut(tween(140)) + shrinkVertically()
-                                        ) {
-                                            SearchBar(
-                                                query = searchQuery,
-                                                onQueryChange = { searchQuery = it }
-                                            )
                                         }
                                     }
                                 }
@@ -746,22 +949,30 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                                             }
                                                         },
                                                         onLongPress = { photo -> selectedIds = selectedIds + photo.id },
+                                                        onRangeSelect = { ids -> selectedIds = selectedIds + ids },
                                                         empty = !loading,
                                                         searchQuery = searchQuery,
                                                         gridColumns = gridColumns,
                                                         onGridColumnsChange = { updateGridColumns(it) }
                                                     )
                                                 } else {
+                                                    val detailPhotos = remember(openingPhoto, gridItems) {
+                                                        if (gridItems.any { it.id == openingPhoto.id || it.uri == openingPhoto.uri }) {
+                                                            gridItems
+                                                        } else {
+                                                            listOf(openingPhoto) + gridItems
+                                                        }
+                                                    }
                                                     PhotoDetail(
                                                         initialPhoto = openingPhoto,
-                                                        photos = gridItems,
+                                                        photos = detailPhotos,
                                                         favoriteIds = favoriteIds,
                                                         onToggleFavorite = { toggleFavorite(it) },
                                                         onClose = { selectedPhoto = null },
                                                         onPlay = { playingVideo = it },
                                                         onTrash = { photo ->
-                                                            val index = gridItems.indexOfFirst { it.id == photo.id }
-                                                            val remaining = gridItems.filter { it.id != photo.id }
+                                                            val index = detailPhotos.indexOfFirst { it.id == photo.id }
+                                                            val remaining = detailPhotos.filter { it.id != photo.id }
                                                             val photoIdStr = photo.id.toString()
                                                             addToTrash(listOf(photoIdStr))
                                                             selectedPhoto = remaining.getOrNull(index) ?: remaining.lastOrNull()
@@ -800,6 +1011,14 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                                 onOpenFavorites = { clearSelection(); page = Page.Photos; mediaFilter = MediaFilter.Favorites },
                                                 onPhoto = { photo -> selectedPhoto = photo }
                                             )
+                                            Page.Search -> SearchPage(
+                                                photos = visiblePhotos,
+                                                searchQuery = searchQuery,
+                                                onQueryChange = { searchQuery = it },
+                                                gridColumns = gridColumns,
+                                                onGridColumnsChange = { updateGridColumns(it) },
+                                                onPhoto = { photo -> selectedPhoto = photo }
+                                            )
                                             Page.CleanUp -> CleanUpPage(
                                                 photos = visiblePhotos,
                                                 onBack = { page = Page.Photos },
@@ -827,10 +1046,8 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                                 trashedCount = trashed.size,
                                                 vaultCount = vaultPhotos.size,
                                                 currentTheme = themeMode,
-                                                gridColumns = gridColumns,
                                                 hasAccess = hasAccess,
                                                 onThemeChange = { updateTheme(it) },
-                                                onGridColumnsChange = { updateGridColumns(it) },
                                                 onOpenTrash = { viewingTrash = true },
                                                 onOpenVault = { viewingVault = true }
                                             )
@@ -872,20 +1089,23 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                         }
                                     }
                                 )
-                            } else if (selectedPhoto == null) {
-                                BottomBar(
-                                    page = page,
-                                    onPage = {
-                                        clearSelection()
-                                        if (it != Page.Photos) {
-                                            isSearching = false
-                                            searchQuery = ""
-                                        }
-                                        page = it
-                                        selectedAlbum = null
-                                    }
-                                )
                             }
+                        }
+
+                        if (!selecting && selectedPhoto == null) {
+                            BottomBar(
+                                page = page,
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                                onPage = {
+                                    clearSelection()
+                                    if (it != Page.Photos && it != Page.Search) {
+                                        isSearching = false
+                                        searchQuery = ""
+                                    }
+                                    page = it
+                                    selectedAlbum = null
+                                }
+                            )
                         }
 
                         SnackbarHost(
@@ -894,6 +1114,9 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                 .align(Alignment.BottomCenter)
                                 .padding(bottom = if (selectedPhoto == null && !selecting) 90.dp else 16.dp)
                         ) { data ->
+                            var offsetX by remember { mutableStateOf(0f) }
+                            var offsetY by remember { mutableStateOf(0f) }
+
                             Snackbar(
                                 snackbarData = data,
                                 containerColor = colors.card,
@@ -902,6 +1125,33 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .padding(horizontal = 16.dp)
+                                    .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                                    .pointerInput(data) {
+                                        detectDragGestures(
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                offsetX += dragAmount.x
+                                                if (dragAmount.y > 0 || offsetY > 0) {
+                                                    offsetY += dragAmount.y
+                                                }
+                                                if (abs(offsetX) > 160f || offsetY > 120f) {
+                                                    data.dismiss()
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                if (abs(offsetX) > 80f || offsetY > 60f) {
+                                                    data.dismiss()
+                                                } else {
+                                                    offsetX = 0f
+                                                    offsetY = 0f
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
+                                        )
+                                    }
                                     .border(1.dp, colors.border, RoundedCornerShape(16.dp))
                             )
                         }
@@ -909,6 +1159,7 @@ fun GalleryApp(initialExternalUri: Uri? = null) {
                 }
             }
         }
+    }
 
             if (sortGroupDialogOpen) {
                 SortAndGroupDialog(

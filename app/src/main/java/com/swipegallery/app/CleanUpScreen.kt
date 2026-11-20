@@ -384,7 +384,6 @@ internal fun CleanUpPage(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
                         .padding(horizontal = 22.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -594,7 +593,7 @@ internal fun CleanUpPage(
                                         if (cluster.type == ClusterType.BurstSequence) {
                                             Spacer(Modifier.width(6.dp))
                                             Text(
-                                                "⚡ Hybrid ML",
+                                                "HYBRID ML",
                                                 fontSize = 9.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = colors.green,

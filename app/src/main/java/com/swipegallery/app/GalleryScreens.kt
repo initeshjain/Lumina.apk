@@ -49,6 +49,7 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -139,7 +140,6 @@ internal fun Header(
     Row(
         Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
             .padding(horizontal = 22.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -154,6 +154,7 @@ internal fun Header(
                     album != null -> album
                     page == Page.Photos -> "Pictures"
                     page == Page.Albums -> "Albums"
+                    page == Page.Search -> "Search"
                     page == Page.CleanUp -> "Clean Up"
                     page == Page.More -> "Library"
                     else -> "Pictures"
@@ -167,6 +168,7 @@ internal fun Header(
                     album != null -> "ALBUM"
                     page == Page.Photos -> "$count items · all memories"
                     page == Page.Albums -> "YOUR COLLECTIONS"
+                    page == Page.Search -> "FIND MEMORIES"
                     page == Page.CleanUp -> "SWIPE TIDY & DUPLICATES"
                     page == Page.More -> "TOOLS & SECURE VAULT"
                     else -> "LUMINA"
@@ -203,13 +205,16 @@ internal fun Header(
 internal fun SearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    autoFocus: Boolean = true
 ) {
     val colors = LocalAppColors.current
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        if (autoFocus) {
+            focusRequester.requestFocus()
+        }
     }
 
     Surface(
@@ -281,102 +286,75 @@ internal fun SearchBar(
 internal fun MediaFilterBar(
     selected: MediaFilter,
     count: Int,
-    currentGroup: MediaGroup,
-    onGroupChange: (MediaGroup) -> Unit,
     onFilter: (MediaFilter) -> Unit,
     onOpenSortGroup: () -> Unit
 ) {
     val colors = LocalAppColors.current
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Timeline grouping pills (Days | Months | Years) + FilterList button
+        Text(
+            "$count ITEMS",
+            fontSize = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.muted
+        )
+
+        Spacer(Modifier.weight(1f))
+
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier
+                .clip(RoundedCornerShape(50))
+                .background(colors.chipBackground)
+                .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.chipBackground)
-                    .padding(3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                listOf(
-                    GroupBy.Date to "Days",
-                    GroupBy.Month to "Months",
-                    GroupBy.Year to "Years"
-                ).forEach { (g, label) ->
-                    val active = currentGroup.groupBy == g
-                    Text(
-                        label,
-                        Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(if (active) colors.card else Color.Transparent)
-                            .clickable { onGroupChange(currentGroup.copy(groupBy = g)) }
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
-                        fontSize = 12.sp,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        color = if (active) colors.green else colors.muted
+            MediaFilter.entries.forEach { filter ->
+                val active = filter == selected
+                val icon = when (filter) {
+                    MediaFilter.All -> SolarIcons.Widget
+                    MediaFilter.Photos -> SolarIcons.Gallery
+                    MediaFilter.Videos -> SolarIcons.VideoCamera
+                    MediaFilter.Favorites -> SolarIcons.Heart
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (active) colors.card else Color.Transparent)
+                        .clickable { onFilter(filter) }
+                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = filter.label,
+                        tint = when {
+                            active && filter == MediaFilter.Favorites -> Color(0xFFE53935)
+                            active -> colors.green
+                            else -> colors.muted
+                        },
+                        modifier = Modifier.size(16.dp)
                     )
                 }
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            FilledTonalIconButton(
-                onClick = onOpenSortGroup,
-                modifier = Modifier.size(36.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = colors.chipBackground,
-                    contentColor = colors.ink
-                )
-            ) {
-                Icon(Icons.Rounded.FilterList, "Sort & Group", modifier = Modifier.size(18.dp))
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.width(8.dp))
 
-        // Media Filter chips (All / Photos / Videos / Favorites) + Count
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "$count ITEMS",
-                fontSize = 10.sp,
-                letterSpacing = 1.2.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.muted
+        FilledTonalIconButton(
+            onClick = onOpenSortGroup,
+            modifier = Modifier.size(36.dp),
+            shape = CircleShape,
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = colors.chipBackground,
+                contentColor = colors.ink
             )
-
-            Spacer(Modifier.weight(1f))
-
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.chipBackground)
-                    .padding(3.dp)
-            ) {
-                MediaFilter.entries.forEach { filter ->
-                    val active = filter == selected
-                    Text(
-                        filter.label,
-                        Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(if (active) colors.card else Color.Transparent)
-                            .clickable { onFilter(filter) }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        fontSize = 11.sp,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (active) colors.green else colors.muted
-                    )
-                }
-            }
+        ) {
+            Icon(Icons.Rounded.FilterList, "Sort & Group", modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -793,18 +771,146 @@ internal fun ModernGridScrollbar(
 }
 
 /**
+ * Dedicated Search Page:
+ * - Search bar at the top automatically focused with virtual keyboard ready
+ * - Live filtering of all photos and videos by name or album
+ * - Quick filter chips (All, Photos, Videos)
+ * - Result count indicator and grid view with pinch-to-zoom
+ */
+@Composable
+internal fun SearchPage(
+    photos: List<Photo>,
+    searchQuery: String,
+    onQueryChange: (String) -> Unit,
+    gridColumns: Int,
+    onGridColumnsChange: (Int) -> Unit,
+    onPhoto: (Photo) -> Unit
+) {
+    val colors = LocalAppColors.current
+    var mediaFilter by remember { mutableStateOf(MediaFilter.All) }
+
+    val filteredPhotos = remember(photos, searchQuery, mediaFilter) {
+        val q = searchQuery.trim()
+        photos.filter { photo ->
+            val matchesQuery = q.isEmpty() || photo.name.contains(q, ignoreCase = true) || photo.album.contains(q, ignoreCase = true)
+            val matchesFilter = when (mediaFilter) {
+                MediaFilter.All -> true
+                MediaFilter.Photos -> !photo.isVideo
+                MediaFilter.Videos -> photo.isVideo
+                MediaFilter.Favorites -> false
+            }
+            matchesQuery && matchesFilter
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(colors.canvas)
+    ) {
+        // Search Input Header
+        SearchBar(
+            query = searchQuery,
+            onQueryChange = onQueryChange,
+            autoFocus = true,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+
+        // Filter chips & count bar
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (searchQuery.isBlank()) "${photos.size} total items" else "${filteredPhotos.size} results",
+                fontSize = 12.sp,
+                color = colors.muted,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.chipBackground)
+                    .padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(MediaFilter.All, MediaFilter.Photos, MediaFilter.Videos).forEach { filter ->
+                    val active = filter == mediaFilter
+                    val icon = when (filter) {
+                        MediaFilter.All -> SolarIcons.Widget
+                        MediaFilter.Photos -> SolarIcons.Gallery
+                        MediaFilter.Videos -> SolarIcons.VideoCamera
+                        else -> SolarIcons.Widget
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (active) colors.card else Color.Transparent)
+                            .clickable { mediaFilter = filter }
+                            .padding(horizontal = 9.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = filter.label,
+                            tint = if (active) colors.green else colors.muted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        if (filteredPhotos.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    icon = SolarIcons.Magnifier,
+                    title = "No results found",
+                    body = if (searchQuery.isBlank()) "Start typing to find photos and videos by name or album." else "No media matched \"$searchQuery\". Try a different search term.",
+                    action = if (searchQuery.isNotBlank()) { { onQueryChange("") } } else null,
+                    actionLabel = "Clear search"
+                )
+            }
+        } else {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                SimplePhotoGrid(
+                    photos = filteredPhotos,
+                    gridColumns = gridColumns,
+                    onGridColumnsChange = onGridColumnsChange,
+                    onPhoto = onPhoto
+                )
+            }
+        }
+    }
+}
+
+/**
  * Reusable flat photo grid with pinch-to-zoom columns and modern scrollbar.
  */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 internal fun SimplePhotoGrid(
     photos: List<Photo>,
     gridColumns: Int = 3,
     onGridColumnsChange: (Int) -> Unit = {},
+    selectedIds: Set<Long> = emptySet(),
     onPhoto: (Photo) -> Unit,
+    onLongPress: ((Photo) -> Unit)? = null,
+    onRangeSelect: ((Set<Long>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val colors = LocalAppColors.current
+    val haptic = LocalHapticFeedback.current
+    val selecting = selectedIds.isNotEmpty()
     val gridState = rememberLazyGridState()
     var showDensityBadge by remember { mutableStateOf(false) }
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var dragCurrentIndex by remember { mutableIntStateOf(-1) }
 
     LaunchedEffect(gridColumns) {
         showDensityBadge = true
@@ -821,24 +927,88 @@ internal fun SimplePhotoGrid(
                 maxColumns = 6,
                 onColumnsChange = onGridColumnsChange
             )
+            .pointerInput(photos) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
+                        val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                            offset.x >= item.offset.x && offset.x <= item.offset.x + item.size.width &&
+                            offset.y >= item.offset.y && offset.y <= item.offset.y + item.size.height
+                        }
+                        val photoId = hitItem?.key as? Long
+                        val idx = photos.indexOfFirst { it.id == photoId }
+                        if (idx >= 0) {
+                            dragStartIndex = idx
+                            dragCurrentIndex = idx
+                            val photo = photos[idx]
+                            onLongPress?.invoke(photo)
+                            onRangeSelect?.invoke(setOf(photo.id))
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        if (dragStartIndex >= 0) {
+                            change.consume()
+                            val pos = change.position
+                            val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                pos.x >= item.offset.x && pos.x <= item.offset.x + item.size.width &&
+                                pos.y >= item.offset.y && pos.y <= item.offset.y + item.size.height
+                            }
+                            val photoId = hitItem?.key as? Long
+                            val idx = photos.indexOfFirst { it.id == photoId }
+                            if (idx >= 0 && idx != dragCurrentIndex) {
+                                dragCurrentIndex = idx
+                                val start = minOf(dragStartIndex, idx)
+                                val end = maxOf(dragStartIndex, idx)
+                                val rangeIds = (start..end).map { photos[it].id }.toSet()
+                                onRangeSelect?.invoke(rangeIds)
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                        }
+                    },
+                    onDragEnd = {
+                        dragStartIndex = -1
+                        dragCurrentIndex = -1
+                    },
+                    onDragCancel = {
+                        dragStartIndex = -1
+                        dragCurrentIndex = -1
+                    }
+                )
+            }
     ) {
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(gridColumns),
-            contentPadding = PaddingValues(start = 3.dp, end = 3.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 3.dp, end = 3.dp, bottom = 96.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             items(photos, key = { it.id }) { photo ->
+                val selected = photo.id in selectedIds
+                val inset by animateFloatAsState(if (selected) 0.86f else 1f, label = "selection inset")
                 Box(
                     Modifier
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { onPhoto(photo) }
+                        .background(if (selected) colors.green.copy(alpha = 0.15f) else Color.Transparent)
+                        .combinedClickable(
+                            onLongClick = { onLongPress?.invoke(photo) }
+                        ) {
+                            onPhoto(photo)
+                        }
                 ) {
-                    GalleryImage(photo.uri, photo.name, Modifier.fillMaxSize())
-                    if (photo.isVideo) {
-                        VideoBadge(photo.durationMs, Modifier.align(Alignment.BottomEnd).padding(5.dp))
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { scaleX = inset; scaleY = inset }
+                            .clip(RoundedCornerShape(if (selected) 10.dp else 4.dp))
+                    ) {
+                        GalleryImage(photo.uri, photo.name, Modifier.fillMaxSize())
+                        if (photo.isVideo) {
+                            VideoBadge(photo.durationMs, Modifier.align(Alignment.BottomEnd).padding(5.dp))
+                        }
+                    }
+                    if (selecting) {
+                        SelectionMark(selected, Modifier.align(Alignment.TopEnd).padding(6.dp))
                     }
                 }
             }
@@ -1129,7 +1299,7 @@ internal fun TimeFoldersView(
                     }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -1200,7 +1370,7 @@ internal fun TimeFoldersView(
                     }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -1244,7 +1414,7 @@ internal fun TimeFoldersView(
 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -1307,8 +1477,6 @@ internal fun PhotoGrid(
         MediaFilterBar(
             selected = filter,
             count = photos.size,
-            currentGroup = group,
-            onGroupChange = onGroupChange,
             onFilter = onFilter,
             onOpenSortGroup = onOpenSortGroup
         )
@@ -1339,57 +1507,59 @@ internal fun PhotoGrid(
                         maxColumns = 6,
                         onColumnsChange = onGridColumnsChange
                     )
-                    .pointerInput(selecting, flatPhotos) {
-                        if (selecting) {
-                            detectDragGestures(
-                                onDragStart = { offset ->
+                    .pointerInput(flatPhotos) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { offset ->
+                                val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                    offset.x >= item.offset.x && offset.x <= item.offset.x + item.size.width &&
+                                    offset.y >= item.offset.y && offset.y <= item.offset.y + item.size.height
+                                }
+                                val photoId = hitItem?.key as? Long
+                                val idx = flatPhotos.indexOfFirst { it.id == photoId }
+                                if (idx >= 0) {
+                                    dragStartIndex = idx
+                                    dragCurrentIndex = idx
+                                    val photo = flatPhotos[idx]
+                                    onLongPress(photo)
+                                    onRangeSelect?.invoke(setOf(photo.id))
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                if (dragStartIndex >= 0) {
+                                    change.consume()
+                                    val pos = change.position
                                     val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
-                                        offset.x >= item.offset.x && offset.x <= item.offset.x + item.size.width &&
-                                        offset.y >= item.offset.y && offset.y <= item.offset.y + item.size.height
+                                        pos.x >= item.offset.x && pos.x <= item.offset.x + item.size.width &&
+                                        pos.y >= item.offset.y && pos.y <= item.offset.y + item.size.height
                                     }
                                     val photoId = hitItem?.key as? Long
                                     val idx = flatPhotos.indexOfFirst { it.id == photoId }
-                                    if (idx >= 0) {
-                                        dragStartIndex = idx
+                                    if (idx >= 0 && idx != dragCurrentIndex) {
                                         dragCurrentIndex = idx
+                                        val start = minOf(dragStartIndex, idx)
+                                        val end = maxOf(dragStartIndex, idx)
+                                        val rangeIds = (start..end).map { flatPhotos[it].id }.toSet()
+                                        onRangeSelect?.invoke(rangeIds)
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     }
-                                },
-                                onDrag = { change, _ ->
-                                    if (dragStartIndex >= 0) {
-                                        change.consume()
-                                        val pos = change.position
-                                        val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
-                                            pos.x >= item.offset.x && pos.x <= item.offset.x + item.size.width &&
-                                            pos.y >= item.offset.y && pos.y <= item.offset.y + item.size.height
-                                        }
-                                        val photoId = hitItem?.key as? Long
-                                        val idx = flatPhotos.indexOfFirst { it.id == photoId }
-                                        if (idx >= 0 && idx != dragCurrentIndex) {
-                                            dragCurrentIndex = idx
-                                            val start = minOf(dragStartIndex, idx)
-                                            val end = maxOf(dragStartIndex, idx)
-                                            val rangeIds = (start..end).map { flatPhotos[it].id }.toSet()
-                                            onRangeSelect?.invoke(rangeIds)
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
-                                    }
-                                },
-                                onDragEnd = {
-                                    dragStartIndex = -1
-                                    dragCurrentIndex = -1
-                                },
-                                onDragCancel = {
-                                    dragStartIndex = -1
-                                    dragCurrentIndex = -1
                                 }
-                            )
-                        }
+                            },
+                            onDragEnd = {
+                                dragStartIndex = -1
+                                dragCurrentIndex = -1
+                            },
+                            onDragCancel = {
+                                dragStartIndex = -1
+                                dragCurrentIndex = -1
+                            }
+                        )
                     }
             ) {
                 LazyVerticalGrid(
                     state = gridState,
                     columns = GridCells.Fixed(gridColumns),
-                    contentPadding = PaddingValues(start = 3.dp, end = 3.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = 3.dp, end = 3.dp, bottom = 96.dp),
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -1480,7 +1650,7 @@ internal fun PhotoGrid(
 internal fun Albums(
     photos: List<Photo>,
     favoritePhotos: List<Photo> = emptyList(),
-    gridColumns: Int = 3,
+    gridColumns: Int = 2,
     onGridColumnsChange: (Int) -> Unit = {},
     onAlbum: (String) -> Unit,
     onOpenFavorites: () -> Unit = {},
@@ -1488,6 +1658,13 @@ internal fun Albums(
 ) {
     val colors = LocalAppColors.current
     var currentTab by remember { mutableStateOf(AlbumTab.Device) }
+    var showDensityBadge by remember { mutableStateOf(false) }
+
+    LaunchedEffect(gridColumns) {
+        showDensityBadge = true
+        delay(1200)
+        showDensityBadge = false
+    }
 
     Column(Modifier.fillMaxSize()) {
         // Top Switcher: [ Device Albums ] | [ Year Folders ]
@@ -1539,9 +1716,20 @@ internal fun Albums(
                 EmptyState(Icons.Rounded.Folder, "No albums yet", "Albums from your device will appear here.", null)
                 return@Column
             }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(16.dp),
+            val albumCols = gridColumns.coerceIn(1, 4)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .detectPinchGrid(
+                        currentColumns = albumCols,
+                        minColumns = 1,
+                        maxColumns = 4,
+                        onColumnsChange = onGridColumnsChange
+                    )
+            ) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(albumCols),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
@@ -1596,6 +1784,15 @@ internal fun Albums(
                         }
                     }
                 }
+            }
+
+                GridDensityBadge(
+                    columns = albumCols,
+                    visible = showDensityBadge,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 28.dp)
+                )
             }
         }
     }
@@ -1784,13 +1981,32 @@ internal fun RoundAction(icon: androidx.compose.ui.graphics.vector.ImageVector, 
  * - Delete button uses correct standard RED shade
  */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 internal fun TrashPage(
     photos: List<Photo>,
+    gridColumns: Int = 2,
+    onGridColumnsChange: (Int) -> Unit = {},
+    selectedIds: Set<Long> = emptySet(),
+    onToggleSelect: (Photo) -> Unit = {},
+    onLongPress: (Photo) -> Unit = {},
+    onRangeSelect: ((Set<Long>) -> Unit)? = null,
     onRestore: (Photo) -> Unit,
     onDelete: (Photo) -> Unit,
     onEmpty: (Set<String>) -> Unit
 ) {
     val colors = LocalAppColors.current
+    val haptic = LocalHapticFeedback.current
+    val selecting = selectedIds.isNotEmpty()
+    val gridState = rememberLazyGridState()
+    var showDensityBadge by remember { mutableStateOf(false) }
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var dragCurrentIndex by remember { mutableIntStateOf(-1) }
+
+    LaunchedEffect(gridColumns) {
+        showDensityBadge = true
+        delay(1200)
+        showDensityBadge = false
+    }
 
     if (photos.isEmpty()) {
         EmptyState(
@@ -1810,22 +2026,86 @@ internal fun TrashPage(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("${photos.size} items", color = colors.muted, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            TextButton(
-                onClick = { onEmpty(photos.map { it.id.toString() }.toSet()) }
-            ) {
-                Icon(Icons.Rounded.DeleteForever, null, tint = colors.red, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("Empty bin", color = colors.red, fontWeight = FontWeight.SemiBold)
+            if (!selecting) {
+                TextButton(
+                    onClick = { onEmpty(photos.map { it.id.toString() }.toSet()) }
+                ) {
+                    Icon(Icons.Rounded.DeleteForever, null, tint = colors.red, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text("Empty bin", color = colors.red, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        val trashCols = gridColumns.coerceIn(1, 4)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .detectPinchGrid(
+                    currentColumns = trashCols,
+                    minColumns = 1,
+                    maxColumns = 4,
+                    onColumnsChange = onGridColumnsChange
+                )
+                .pointerInput(photos) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                offset.x >= item.offset.x && offset.x <= item.offset.x + item.size.width &&
+                                offset.y >= item.offset.y && offset.y <= item.offset.y + item.size.height
+                            }
+                            val photoId = hitItem?.key as? Long
+                            val idx = photos.indexOfFirst { it.id == photoId }
+                            if (idx >= 0) {
+                                dragStartIndex = idx
+                                dragCurrentIndex = idx
+                                val photo = photos[idx]
+                                onLongPress(photo)
+                                onRangeSelect?.invoke(setOf(photo.id))
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                        },
+                        onDrag = { change, _ ->
+                            if (dragStartIndex >= 0) {
+                                change.consume()
+                                val pos = change.position
+                                val hitItem = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                    pos.x >= item.offset.x && pos.x <= item.offset.x + item.size.width &&
+                                    pos.y >= item.offset.y && pos.y <= item.offset.y + item.size.height
+                                }
+                                val photoId = hitItem?.key as? Long
+                                val idx = photos.indexOfFirst { it.id == photoId }
+                                if (idx >= 0 && idx != dragCurrentIndex) {
+                                    dragCurrentIndex = idx
+                                    val start = minOf(dragStartIndex, idx)
+                                    val end = maxOf(dragStartIndex, idx)
+                                    val rangeIds = (start..end).map { photos[it].id }.toSet()
+                                    onRangeSelect?.invoke(rangeIds)
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                            }
+                        },
+                        onDragEnd = {
+                            dragStartIndex = -1
+                            dragCurrentIndex = -1
+                        },
+                        onDragCancel = {
+                            dragStartIndex = -1
+                            dragCurrentIndex = -1
+                        }
+                    )
+                }
         ) {
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(trashCols),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             items(photos, key = { it.id }) { photo ->
+                val selected = photo.id in selectedIds
+                val inset by animateFloatAsState(if (selected) 0.88f else 1f, label = "trash selection inset")
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1836,10 +2116,15 @@ internal fun TrashPage(
                                 dampingRatio = Spring.DampingRatioLowBouncy,
                                 stiffness = Spring.StiffnessMediumLow
                             )
-                        ),
+                        )
+                        .combinedClickable(
+                            onLongClick = { onLongPress(photo) }
+                        ) {
+                            if (selecting) onToggleSelect(photo)
+                        },
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = colors.card),
-                    border = BorderStroke(1.dp, colors.border),
+                    colors = CardDefaults.cardColors(containerColor = if (selected) colors.green.copy(alpha = 0.12f) else colors.card),
+                    border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) colors.green else colors.border),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column {
@@ -1848,14 +2133,22 @@ internal fun TrashPage(
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
                         ) {
-                            GalleryImage(
-                                photo.uri,
-                                photo.name,
+                            Box(
                                 Modifier
                                     .fillMaxSize()
+                                    .graphicsLayer { scaleX = inset; scaleY = inset }
                                     .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                            )
-                            if (photo.isVideo) VideoBadge(photo.durationMs, Modifier.align(Alignment.BottomEnd).padding(6.dp))
+                            ) {
+                                GalleryImage(
+                                    photo.uri,
+                                    photo.name,
+                                    Modifier.fillMaxSize()
+                                )
+                                if (photo.isVideo) VideoBadge(photo.durationMs, Modifier.align(Alignment.BottomEnd).padding(6.dp))
+                            }
+                            if (selecting) {
+                                SelectionMark(selected, Modifier.align(Alignment.TopEnd).padding(8.dp))
+                            }
                         }
 
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -1923,7 +2216,16 @@ internal fun TrashPage(
                 }
             }
         }
+
+        GridDensityBadge(
+            columns = trashCols,
+            visible = showDensityBadge,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 28.dp)
+        )
     }
+}
 }
 
 /**
@@ -2246,7 +2548,11 @@ internal fun PhotoDetail(
     onShare: (Photo) -> Unit = {},
     onPhotoSaved: (Uri) -> Unit = {}
 ) {
-    val pagerState = rememberPagerState(initialPage = photos.indexOfFirst { it.id == initialPhoto.id }.coerceAtLeast(0)) { photos.size }
+    val targetInitialIndex = remember(initialPhoto.id, initialPhoto.uri, photos) {
+        val byId = photos.indexOfFirst { it.id == initialPhoto.id }
+        if (byId >= 0) byId else photos.indexOfFirst { it.uri == initialPhoto.uri }.coerceAtLeast(0)
+    }
+    val pagerState = rememberPagerState(initialPage = targetInitialIndex) { photos.size }
     val scope = rememberCoroutineScope()
     val colors = LocalAppColors.current
     val context = LocalContext.current
@@ -2787,34 +3093,71 @@ private fun PopoverItemRow(
     }
 }
 
+/**
+ * 2027 Hover Translucent Sharp Floating Bottom Bar:
+ * - Detached floating pill hovering above the navigation bar
+ * - Translucent glass diffusion with ultra-thin hairline border (0.75dp)
+ * - Sharp icon-only design using Solar Linear icon pack
+ * - Tactile active pill indicator with haptic-friendly layout
+ */
 @Composable
 internal fun BottomBar(
     page: Page,
-    onPage: (Page) -> Unit
+    onPage: (Page) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = LocalAppColors.current
-    Column(Modifier.fillMaxWidth().background(colors.card)) {
-        NavigationBar(containerColor = colors.card, tonalElevation = 0.dp, windowInsets = WindowInsets.navigationBars) {
-            val entries = listOf(
-                Triple(Page.Photos, Icons.Rounded.GridView, "Pictures"),
-                Triple(Page.Albums, Icons.Rounded.PhotoLibrary, "Albums"),
-                Triple(Page.CleanUp, Icons.Rounded.AutoAwesome, "Clean Up"),
-                Triple(Page.More, Icons.Rounded.MoreHoriz, "More")
-            )
-            entries.forEach { (target, icon, label) ->
-                NavigationBarItem(
-                    selected = page == target,
-                    onClick = { onPage(target) },
-                    icon = { Icon(icon, label) },
-                    label = { Text(label, fontSize = 10.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = colors.green,
-                        selectedTextColor = colors.green,
-                        indicatorColor = colors.green.copy(alpha = 0.15f),
-                        unselectedIconColor = colors.muted,
-                        unselectedTextColor = colors.muted
-                    )
-                )
+
+    val entries = listOf(
+        Triple(Page.Photos, SolarIcons.Gallery, "Pictures"),
+        Triple(Page.Albums, SolarIcons.Folder, "Albums"),
+        Triple(Page.Search, SolarIcons.Magnifier, "Search"),
+        Triple(Page.CleanUp, SolarIcons.Stars, "Clean Up"),
+        Triple(Page.More, SolarIcons.MenuDots, "More")
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = if (colors.isDark) Color(0x99101216) else Color(0xB8FFFFFF),
+            border = BorderStroke(0.75.dp, if (colors.isDark) Color(0x33FFFFFF) else Color(0x28000000)),
+            shadowElevation = 8.dp,
+            modifier = Modifier.widthIn(max = 420.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                entries.forEach { (target, icon, label) ->
+                    val isSelected = page == target
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) { onPage(target) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = label,
+                            tint = if (isSelected) colors.green else colors.muted.copy(alpha = 0.65f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -2825,10 +3168,8 @@ internal fun MorePage(
     trashedCount: Int,
     vaultCount: Int,
     currentTheme: ThemeMode,
-    gridColumns: Int,
     hasAccess: Boolean,
     onThemeChange: (ThemeMode) -> Unit,
-    onGridColumnsChange: (Int) -> Unit,
     onOpenTrash: () -> Unit,
     onOpenVault: () -> Unit
 ) {
@@ -2839,7 +3180,6 @@ internal fun MorePage(
         Modifier
             .fillMaxSize()
             .background(colors.canvas)
-            .statusBarsPadding()
             .padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -2864,23 +3204,12 @@ internal fun MorePage(
 
         // 1. Security & Vault Section
         item {
-            Text(
-                "SECURITY & VAULT",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-                color = colors.muted,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-            )
-        }
-
-        item {
             LibraryCard(
-                icon = Icons.Rounded.Lock,
+                icon = SolarIcons.Lock,
                 iconTint = colors.green,
                 iconBg = colors.green.copy(alpha = 0.12f),
-                title = "Hidden Vault",
-                subtitle = if (vaultCount == 0) "PIN-protected private photos" else "$vaultCount hidden items · locked",
+                title = "Vault",
+                subtitle = if (vaultCount == 0) "Locked" else "$vaultCount hidden",
                 badge = if (vaultCount > 0) "$vaultCount" else null,
                 onClick = onOpenVault
             )
@@ -2888,11 +3217,11 @@ internal fun MorePage(
 
         item {
             LibraryCard(
-                icon = Icons.Rounded.DeleteOutline,
+                icon = SolarIcons.TrashBin,
                 iconTint = colors.red,
                 iconBg = colors.red.copy(alpha = 0.12f),
-                title = "Trash Bin",
-                subtitle = if (trashedCount == 0) "Bin is empty" else "$trashedCount items · recoverable",
+                title = "Trash",
+                subtitle = if (trashedCount == 0) "Empty" else "$trashedCount items",
                 badge = if (trashedCount > 0) "$trashedCount" else null,
                 onClick = onOpenTrash
             )
@@ -2900,130 +3229,75 @@ internal fun MorePage(
 
         // 2. Appearance & Display Section
         item {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "APPEARANCE & DISPLAY",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-                color = colors.muted,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-            )
-        }
-
-        // Inline Theme Mode Card
-        item {
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = colors.card,
                 border = BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(colors.chipBackground),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Rounded.SettingsBrightness, null, tint = colors.ink, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text("Theme Mode", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-                            Text(currentTheme.label, fontSize = 12.sp, color = colors.muted)
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Row(
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
                         Modifier
-                            .fillMaxWidth()
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(colors.chipBackground),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            when (currentTheme) {
+                                ThemeMode.System -> SolarIcons.Widget
+                                ThemeMode.Light -> SolarIcons.Sun
+                                ThemeMode.Dark -> SolarIcons.Moon
+                            },
+                            contentDescription = null,
+                            tint = colors.green,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(16.dp))
+
+                    Text(
+                        "Theme",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.ink,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Row(
+                        modifier = Modifier
                             .clip(RoundedCornerShape(14.dp))
                             .background(colors.chipBackground)
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val themes = listOf(
-                            ThemeMode.System to "System",
-                            ThemeMode.Light to "Light",
-                            ThemeMode.Dark to "Dark"
+                        val themeOptions = listOf(
+                            Triple(ThemeMode.System, SolarIcons.Widget, "System default"),
+                            Triple(ThemeMode.Light, SolarIcons.Sun, "Light mode"),
+                            Triple(ThemeMode.Dark, SolarIcons.Moon, "Dark mode")
                         )
-                        themes.forEach { (mode, label) ->
+                        themeOptions.forEach { (mode, icon, label) ->
                             val isSelected = currentTheme == mode
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .size(36.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(if (isSelected) colors.card else Color.Transparent)
-                                    .clickable { onThemeChange(mode) }
-                                    .padding(vertical = 8.dp),
+                                    .clickable { onThemeChange(mode) },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) colors.green else colors.muted
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Inline Default Grid Density Card
-        item {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = colors.card,
-                border = BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(colors.chipBackground),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Rounded.GridView, null, tint = colors.ink, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text("Default Grid Columns", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-                            Text("$gridColumns columns per row", fontSize = 12.sp, color = colors.muted)
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(colors.chipBackground)
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        (2..5).forEach { cols ->
-                            val isSelected = gridColumns == cols
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) colors.card else Color.Transparent)
-                                    .clickable { onGridColumnsChange(cols) }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "$cols",
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) colors.green else colors.muted
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = if (isSelected) colors.green else colors.muted,
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
                         }
@@ -3034,40 +3308,28 @@ internal fun MorePage(
 
         // 3. System & Permissions Section
         item {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "STORAGE & SYSTEM",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-                color = colors.muted,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-            )
-        }
-
-        item {
             LibraryCard(
-                icon = Icons.Rounded.PhotoLibrary,
+                icon = SolarIcons.ShieldCheck,
                 iconTint = colors.green,
                 iconBg = colors.green.copy(alpha = 0.12f),
-                title = "Photo & Video Access",
-                subtitle = if (hasAccess) "Full access granted · Android MediaStore" else "Access restricted · Tap to grant permissions",
-                badge = if (hasAccess) "Active" else "Off",
+                title = "Permissions",
+                subtitle = if (hasAccess) "Granted" else "Restricted",
+                badge = if (hasAccess) "OK" else "Fix",
                 onClick = { openAppSettings(context) }
             )
         }
 
         item {
             LibraryCard(
-                icon = Icons.Rounded.BugReport,
+                icon = SolarIcons.ChatRoundDots,
                 iconTint = colors.ink,
                 iconBg = colors.chipBackground,
-                title = "Report an Issue",
-                subtitle = "Send crash reports or feedback via email",
+                title = "Feedback",
+                subtitle = "Send crash reports or suggestions",
                 onClick = {
                     val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
-                        data = Uri.parse("mailto:support@swipegallery.app")
-                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v2.2.0")
+                        data = Uri.parse("mailto:$SUPPORT_EMAIL")
+                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v3.0.0")
                     }
                     try { context.startActivity(emailIntent) } catch (_: Exception) {}
                 }
@@ -3076,7 +3338,7 @@ internal fun MorePage(
 
         // 4. About Lumina Footer
         item {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(4.dp))
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3088,40 +3350,57 @@ internal fun MorePage(
                 color = colors.card,
                 border = BorderStroke(1.dp, colors.border.copy(alpha = 0.5f))
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "LUMINA GALLERY",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp,
-                        color = colors.ink
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Version 2.2.0 · Fast, Comfy & Private",
-                        fontSize = 12.sp,
-                        color = colors.muted
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "100% offline · Zero tracking · Hardware-accelerated",
-                        fontSize = 11.sp,
-                        color = colors.muted.copy(alpha = 0.8f),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Created by @initeshjain on GitHub",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.green
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "LUMINA",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp,
+                            color = colors.ink
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "v3.0.0 · Offline · Private",
+                            fontSize = 11.sp,
+                            color = colors.muted
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Created",
+                            fontSize = 12.sp,
+                            color = colors.muted
+                        )
+                        Icon(
+                            imageVector = SolarIcons.Heart,
+                            contentDescription = "Love",
+                            tint = Color(0xFFE45167),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            "by",
+                            fontSize = 12.sp,
+                            color = colors.muted
+                        )
+                        Text(
+                            "@initeshjain",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.green
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(100.dp))
         }
     }
 }

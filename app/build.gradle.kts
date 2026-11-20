@@ -21,8 +21,8 @@ android {
         applicationId = "com.swipegallery.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "2.2.0"
+        versionCode = 6
+        versionName = "3.0.0"
     }
     signingConfigs {
         if (localReleaseSigningFile.isFile) {

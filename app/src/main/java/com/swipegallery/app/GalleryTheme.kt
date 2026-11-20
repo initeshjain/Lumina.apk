@@ -64,30 +64,30 @@ data class AppColors(
 )
 
 private val LightAppColors = AppColors(
-    canvas = Color(0xFFF7F8FA),
+    canvas = Color(0xFFF9F8F5), // Solar-icons warm parchment paper
     card = Color(0xFFFFFFFF),
-    cardSecondary = Color(0xFFF1F3F5),
-    ink = Color(0xFF1A1C1E),
-    muted = Color(0xFF72777F),
+    cardSecondary = Color(0xFFF3F1ED),
+    ink = Color(0xFF14171A),
+    muted = Color(0xFF7C828A),
     green = GreenPrimary,
     red = RedStandard,
     restoreBlack = RestoreBlack,
-    border = Color(0xFFE3E5E9),
-    chipBackground = Color(0xFFE9ECEF),
+    border = Color(0xFFE8E5DF),
+    chipBackground = Color(0xFFEFECE6),
     isDark = false
 )
 
 private val DarkAppColors = AppColors(
-    canvas = Color(0xFF111315),
-    card = Color(0xFF1E2124),
-    cardSecondary = Color(0xFF2A2D32),
-    ink = Color(0xFFE3E5E8),
-    muted = Color(0xFF9197A2),
+    canvas = Color(0xFF090A0D), // Solar-icons deep obsidian carbon paper
+    card = Color(0xFF14161B),
+    cardSecondary = Color(0xFF1D2026),
+    ink = Color(0xFFF2F4F8),
+    muted = Color(0xFF868E9B),
     green = GreenDark,
     red = Color(0xFFEF5350),
     restoreBlack = RestoreBlack,
-    border = Color(0xFF2E3238),
-    chipBackground = Color(0xFF282B30),
+    border = Color(0xFF232730),
+    chipBackground = Color(0xFF1A1D24),
     isDark = true
 )
 
