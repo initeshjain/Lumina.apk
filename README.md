@@ -10,13 +10,23 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v2.2.0-blue.svg?logo=android" alt="Version v2.2.0" />
+  <img src="https://img.shields.io/badge/Version-v3.0.0-blue.svg?logo=android" alt="Version v3.0.0" />
   <img src="https://img.shields.io/badge/Kotlin-2.0.0-blue.svg?logo=kotlin" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack%20Compose-2024.12.01-green.svg?logo=android" alt="Jetpack Compose" />
   <img src="https://img.shields.io/badge/Material%203-Expressive-purple.svg" alt="Material 3" />
   <img src="https://img.shields.io/badge/Android-8.0%2B%20%28API%2026%E2%80%9335%29-brightgreen.svg" alt="Android API 26-35" />
   <img src="https://img.shields.io/badge/Privacy-100%25%20Offline-orange.svg" alt="100% Offline" />
   <a href="https://github.com/initeshjain"><img src="https://img.shields.io/badge/Developer-%40initeshjain-black.svg?logo=github" alt="GitHub @initeshjain" /></a>
+</p>
+
+---
+
+## App Screenshots
+
+<p align="center">
+  <img src="store_assets/screenshots/screenshot_1_gallery.png" width="31%" alt="Gallery Screen" />
+  <img src="store_assets/screenshots/screenshot_2_cleanup.png" width="31%" alt="Clean Up Screen" />
+  <img src="store_assets/screenshots/screenshot_3_vault.png" width="31%" alt="Hidden Vault Screen" />
 </p>
 
 ---
