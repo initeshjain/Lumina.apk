@@ -3329,7 +3329,7 @@ internal fun MorePage(
                 onClick = {
                     val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
                         data = Uri.parse("mailto:$SUPPORT_EMAIL")
-                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v3.0.0")
+                        putExtra(Intent.EXTRA_SUBJECT, "Lumina Gallery Feedback v${BuildConfig.VERSION_NAME}")
                     }
                     try { context.startActivity(emailIntent) } catch (_: Exception) {}
                 }
@@ -3366,7 +3366,7 @@ internal fun MorePage(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            "v3.0.0 · Offline · Private",
+                            "v${BuildConfig.VERSION_NAME} · Offline · Private",
                             fontSize = 11.sp,
                             color = colors.muted
                         )
