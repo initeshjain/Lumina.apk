@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v3.0.0-blue.svg?logo=android" alt="Version v3.0.0" />
+  <img src="https://img.shields.io/badge/Version-v3.1.0-blue.svg?logo=android" alt="Version v3.1.0" />
   <img src="https://img.shields.io/badge/Kotlin-2.0.0-blue.svg?logo=kotlin" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Jetpack%20Compose-2024.12.01-green.svg?logo=android" alt="Jetpack Compose" />
   <img src="https://img.shields.io/badge/Material%203-Expressive-purple.svg" alt="Material 3" />

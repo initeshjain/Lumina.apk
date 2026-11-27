@@ -3125,9 +3125,9 @@ internal fun BottomBar(
     ) {
         Surface(
             shape = RoundedCornerShape(26.dp),
-            color = if (colors.isDark) Color(0x99101216) else Color(0xB8FFFFFF),
-            border = BorderStroke(0.75.dp, if (colors.isDark) Color(0x33FFFFFF) else Color(0x28000000)),
-            shadowElevation = 8.dp,
+            color = if (colors.isDark) Color(0xFF161A1D) else Color(0xFFFFFFFF),
+            border = BorderStroke(1.dp, colors.border),
+            shadowElevation = 10.dp,
             modifier = Modifier.widthIn(max = 420.dp)
         ) {
             Row(

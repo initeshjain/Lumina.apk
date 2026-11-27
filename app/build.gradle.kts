@@ -18,11 +18,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.swipegallery.app"
+        applicationId = "com.nkj.lumina.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "3.0.0"
+        versionCode = 7
+        versionName = "3.1.0"
     }
     signingConfigs {
         if (localReleaseSigningFile.isFile) {
